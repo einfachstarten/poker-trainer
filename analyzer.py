@@ -12,11 +12,38 @@ import log
 
 L = log.get("analyzer")
 
-QUICK_PROMPT = """Poker-Coach. Screenshot analysieren.
+PLAY_STYLES = {
+    "TAG": {
+        "name": "Tight-Aggressive",
+        "desc": "Wenige Hände, aber aggressiv spielen. Nur Premium-Hände und starke Draws.",
+        "prompt": "SPIELSTIL: Tight-Aggressive (TAG). Spiele nur starke Hände (Top 15-20%), aber spiele sie aggressiv. Folde schwache Hände konsequent. Raise statt Call bevorzugen. Position ist sehr wichtig.",
+    },
+    "LAG": {
+        "name": "Loose-Aggressive",
+        "desc": "Viele Hände, aggressiv spielen. Druck auf Gegner ausüben, viele Bluffs.",
+        "prompt": "SPIELSTIL: Loose-Aggressive (LAG). Spiele ein breites Spektrum an Händen aggressiv. Nutze Position und Initiative. Bluffing und Semi-Bluffs sind wichtige Waffen. Setze Gegner unter Druck.",
+    },
+    "Conservative": {
+        "name": "Konservativ",
+        "desc": "Sehr sicher spielen. Nur die besten Hände, kaum Risiko.",
+        "prompt": "SPIELSTIL: Konservativ/Tight-Passive. Spiele nur Premium-Hände (Top 10%). Vermeide Risiko. Calle eher als zu raisen. Im Zweifel folden. Bankroll-Schutz hat Priorität.",
+    },
+    "Balanced": {
+        "name": "Balanced",
+        "desc": "Ausgewogener GTO-Stil. Mix aus Aggression und Vorsicht.",
+        "prompt": "SPIELSTIL: Balanced/GTO-orientiert. Spiele einen ausgewogenen Mix. Variiere zwischen Raise und Call. Nutze Position, aber nicht überaggressiv. Solides ABC-Poker mit gelegentlichen Bluffs.",
+    },
+}
+
+DEFAULT_STYLE = "TAG"
+
+QUICK_PROMPT_TEMPLATE = """Poker-Coach. Screenshot analysieren.
 
 SPIELER: Sitzt UNTEN am Tisch, wo Aktionsbuttons sind (Fold/Check/Call/Raise). Seine Hole Cards sind dort.
 Wenn Aktionsbuttons sichtbar → Spieler ist dran und HAT Karten.
 Wenn KEINE Buttons/Karten → ACTION: WAIT
+
+{style_prompt}
 
 KRITISCH: Deine KOMPLETTE Antwort besteht aus GENAU 5 Zeilen. Kein Text davor. Kein Text danach. Keine Erklärung. Keine Analyse. Nur diese 5 Zeilen:
 
@@ -26,11 +53,13 @@ HAND: deine Karten
 POTODDS: z.B. 3:1 oder -
 EQUITY: z.B. 65% oder -"""
 
-DETAIL_PROMPT = """Du bist ein Poker-Coach. Quick-Analyse dieses Tisches:
+DETAIL_PROMPT_TEMPLATE = """Du bist ein Poker-Coach. Quick-Analyse dieses Tisches:
 
 {quick_result}
 
 Der gecoachte Spieler sitzt unten am Tisch (dort wo die Aktionsbuttons sind).
+
+{style_prompt}
 
 AUSGABE — NUR diese 3 Zeilen, NICHTS anderes:
 REASON: 2-3 Sätze strategische Begründung inkl. Pot Odds und Equity
@@ -105,14 +134,23 @@ def optimize_image(img: Image.Image) -> str:
 
 
 class Analyzer:
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6"):
+    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6", style: str = DEFAULT_STYLE):
         import anthropic
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model
+        self.style = style
         self._opponent_history: list[str] = []
         self._last_b64: str | None = None
         self._last_quick_tip: PokerTip | None = None
-        L.info(f"Analyzer bereit: model={model}, key=...{api_key[-8:]}")
+        L.info(f"Analyzer bereit: model={model}, style={style}, key=...{api_key[-8:]}")
+
+    def set_style(self, style: str):
+        if style in PLAY_STYLES:
+            self.style = style
+            L.info(f"Spielstil geändert: {PLAY_STYLES[style]['name']}")
+
+    def _get_style_prompt(self) -> str:
+        return PLAY_STYLES.get(self.style, PLAY_STYLES[DEFAULT_STYLE])["prompt"]
 
     def _build_opponent_context(self) -> str:
         if not self._opponent_history:
@@ -143,7 +181,7 @@ class Analyzer:
             with self.client.messages.stream(
                 model=self.model,
                 max_tokens=120,
-                system=QUICK_PROMPT,
+                system=QUICK_PROMPT_TEMPLATE.format(style_prompt=self._get_style_prompt()),
                 messages=[{
                     "role": "user",
                     "content": [
@@ -193,7 +231,10 @@ class Analyzer:
             with self.client.messages.stream(
                 model=self.model,
                 max_tokens=250,
-                system=DETAIL_PROMPT.format(quick_result=quick_summary),
+                system=DETAIL_PROMPT_TEMPLATE.format(
+                    quick_result=quick_summary,
+                    style_prompt=self._get_style_prompt(),
+                ),
                 messages=[{
                     "role": "user",
                     "content": [

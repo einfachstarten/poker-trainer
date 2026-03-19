@@ -16,7 +16,6 @@ from Quartz import (
     CFRunLoopAddSource, kCFRunLoopCommonModes, CFRunLoopRun,
 )
 
-import os
 import log
 log.setup()
 L = log.get("main")
@@ -39,14 +38,7 @@ DETAIL_NAME = "F3"
 
 class PokerTrainerApp(rumps.App):
     def __init__(self):
-        icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
-        has_icon = os.path.exists(icon_path)
-        super().__init__(
-            "Poker Trainer",
-            icon=icon_path if has_icon else None,
-            title=None if has_icon else "♠️",
-            quit_button=None,
-        )
+        super().__init__("Poker Trainer", icon=None, title="♠️")
         self.cfg = config.load()
         L.info(f"Config geladen: region={self.cfg.get('crop_region')}")
         self.running = False
@@ -55,12 +47,16 @@ class PokerTrainerApp(rumps.App):
         self._analyzing = False
         self._detailing = False
 
+        self._current_style = self.cfg.get("play_style", analyzer.DEFAULT_STYLE)
+        current_name = analyzer.PLAY_STYLES.get(self._current_style, {}).get("name", "TAG")
+        self._style_button = rumps.MenuItem(f"Stil: {current_name}", callback=self._cycle_style)
+
         self.menu = [
             rumps.MenuItem("Start", callback=self.toggle),
             rumps.MenuItem("Neue Region", callback=self.new_region),
+            self._style_button,
             rumps.MenuItem("Stats", callback=self.show_stats),
             None,
-            rumps.MenuItem("Quit", callback=self.on_quit),
         ]
 
     def toggle(self, sender):
@@ -93,6 +89,20 @@ class PokerTrainerApp(rumps.App):
         else:
             L.info("Region-Auswahl abgebrochen")
 
+    def _cycle_style(self, sender):
+        keys = list(analyzer.PLAY_STYLES.keys())
+        idx = keys.index(self._current_style) if self._current_style in keys else 0
+        new_key = keys[(idx + 1) % len(keys)]
+
+        self._current_style = new_key
+        self.cfg["play_style"] = new_key
+        config.save(self.cfg)
+        if self.analyzer_inst:
+            self.analyzer_inst.set_style(new_key)
+
+        sender.title = f"Stil: {analyzer.PLAY_STYLES[new_key]['name']}"
+        L.info(f"Spielstil: {analyzer.PLAY_STYLES[new_key]['name']}")
+
     def show_stats(self, _):
         stats = history.get_session_stats()
         L.info(f"Stats: {stats}")
@@ -123,6 +133,7 @@ class PokerTrainerApp(rumps.App):
         self.analyzer_inst = analyzer.Analyzer(
             api_key=api_key,
             model=self.cfg.get("model", "claude-sonnet-4-6"),
+            style=self.cfg.get("play_style", analyzer.DEFAULT_STYLE),
         )
 
         self.overlay_win = overlay.Overlay(
@@ -289,6 +300,7 @@ class PokerTrainerApp(rumps.App):
         finally:
             self._detailing = False
 
+    @rumps.clicked("Quit")
     def on_quit(self, _):
         L.info("Quit angefordert")
         self.stop_monitoring()
