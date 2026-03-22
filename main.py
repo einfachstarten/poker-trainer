@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+import json
+import os
+import signal
+import subprocess
 import sys
 import threading
 import time
+import urllib.request
+
+VERSION = "1.2.0"
+REPO = "einfachstarten/poker-trainer"
+PID_FILE = os.path.expanduser("~/.poker-trainer/poker-trainer.pid")
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 import rumps
 from Quartz import (
@@ -51,13 +61,19 @@ class PokerTrainerApp(rumps.App):
         current_name = analyzer.PLAY_STYLES.get(self._current_style, {}).get("name", "TAG")
         self._style_button = rumps.MenuItem(f"Stil: {current_name}", callback=self._cycle_style)
 
+        self._update_button = rumps.MenuItem(f"Version {VERSION}", callback=None)
+        self._update_button.set_callback(None)
+
         self.menu = [
             rumps.MenuItem("Start", callback=self.toggle),
             rumps.MenuItem("Neue Region", callback=self.new_region),
             self._style_button,
             rumps.MenuItem("Stats", callback=self.show_stats),
             None,
+            self._update_button,
         ]
+
+        threading.Thread(target=self._check_for_update, daemon=True).start()
 
     def toggle(self, sender):
         if self.running:
@@ -109,6 +125,10 @@ class PokerTrainerApp(rumps.App):
         rumps.alert("Poker Trainer Stats", stats)
 
     def start_monitoring(self):
+        if self.overlay_win:
+            L.warning("Overlay existiert bereits, überspringe")
+            return
+
         api_key = config.get_api_key(self.cfg)
         if not api_key:
             L.error("Kein API Key!")
@@ -139,6 +159,7 @@ class PokerTrainerApp(rumps.App):
         self.overlay_win = overlay.Overlay(
             position=self.cfg.get("overlay_position"),
             size=self.cfg.get("overlay_size"),
+            on_button=self._on_overlay_button,
         )
         self.overlay_win.start()
         L.info("Overlay gestartet")
@@ -162,6 +183,90 @@ class PokerTrainerApp(rumps.App):
             self.overlay_win.stop()
             self.overlay_win = None
             L.info("Overlay gestoppt, Position gespeichert")
+
+    def _check_for_update(self):
+        """Check GitHub releases API for newer version."""
+        try:
+            url = f"https://api.github.com/repos/{REPO}/releases"
+            req = urllib.request.Request(url, headers={"User-Agent": "PokerTrainer"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                releases = json.loads(resp.read())
+
+            if not releases:
+                return
+
+            # Find highest version tag
+            latest_tag = None
+            for r in releases:
+                tag = r.get("tag_name", "").lstrip("v")
+                if not latest_tag or self._version_tuple(tag) > self._version_tuple(latest_tag):
+                    latest_tag = tag
+
+            if latest_tag and self._version_tuple(latest_tag) > self._version_tuple(VERSION):
+                L.info(f"Update verfügbar: v{latest_tag} (aktuell: v{VERSION})")
+                self._update_button.title = f"⬆ Update → v{latest_tag}"
+                self._update_button.set_callback(self._do_update)
+            else:
+                L.info(f"Kein Update (v{VERSION} ist aktuell)")
+        except Exception as e:
+            L.warning(f"Update-Check fehlgeschlagen: {e}")
+
+    @staticmethod
+    def _version_tuple(v: str) -> tuple:
+        try:
+            return tuple(int(x) for x in v.split("."))
+        except ValueError:
+            return (0,)
+
+    def _do_update(self, _):
+        """Pull latest code and restart."""
+        L.info("Update wird durchgeführt...")
+        self._update_button.title = "Updating..."
+        self._update_button.set_callback(None)
+
+        def _run_update():
+            try:
+                result = subprocess.run(
+                    ["git", "pull", "--ff-only"],
+                    cwd=APP_DIR, capture_output=True, text=True, timeout=30,
+                )
+                if result.returncode != 0:
+                    L.error(f"git pull fehlgeschlagen: {result.stderr}")
+                    rumps.alert("Update fehlgeschlagen", result.stderr)
+                    self._update_button.title = "Update fehlgeschlagen"
+                    return
+
+                L.info(f"git pull OK: {result.stdout.strip()}")
+                rumps.alert("Update installiert", f"Poker Trainer wird neu gestartet.")
+                # Restart
+                self.stop_monitoring()
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+            except Exception as e:
+                L.error(f"Update Error: {e}")
+                rumps.alert("Update fehlgeschlagen", str(e))
+
+        threading.Thread(target=_run_update, daemon=True).start()
+
+    def _speak(self, text):
+        """Speak text using macOS say in background."""
+        clean = text.replace("♠", " spades").replace("♦", " diamonds")
+        clean = clean.replace("♥", " hearts").replace("♣", " clubs")
+        clean = clean.replace("→", "").replace("—", ",")
+        subprocess.Popen(["say", "-v", "Daniel", clean])
+
+    def _on_overlay_button(self, tag):
+        """Handle overlay button clicks: 1=quick, 2=newround, 3=detail."""
+        if not self.running:
+            return
+        if tag == 1 and not self._analyzing:
+            L.info("Button: Quick-Analyse")
+            threading.Thread(target=self._do_analysis, daemon=True).start()
+        elif tag == 2:
+            L.info("Button: Neue Runde")
+            self._new_round()
+        elif tag == 3 and not self._detailing:
+            L.info("Button: Detail")
+            threading.Thread(target=self._do_detail, daemon=True).start()
 
     def _listen_hotkey(self):
         """Listen for global hotkey events via Quartz Event Tap."""
@@ -295,16 +400,44 @@ class PokerTrainerApp(rumps.App):
                     tip.pot_odds, tip.equity,
                 )
                 L.info(f"Detail nach {dt:.1f}s: {tip.reason[:60]}...")
+                if tip.reason:
+                    self._speak(tip.reason)
             elif not tip:
                 L.warning(f"Detail fehlgeschlagen nach {dt:.1f}s")
         finally:
             self._detailing = False
 
-    @rumps.clicked("Quit")
-    def on_quit(self, _):
+    def terminate(self):
         L.info("Quit angefordert")
         self.stop_monitoring()
-        rumps.quit_application()
+        super().terminate()
+
+
+def _kill_existing():
+    """Kill any existing instance via PID file."""
+    if not os.path.exists(PID_FILE):
+        return
+    try:
+        old_pid = int(open(PID_FILE).read().strip())
+        os.kill(old_pid, signal.SIGTERM)
+        L.info(f"Alte Instanz (PID {old_pid}) beendet")
+        time.sleep(0.5)
+    except (ProcessLookupError, ValueError):
+        pass  # already dead
+    except PermissionError:
+        L.warning(f"Konnte PID {old_pid} nicht beenden")
+
+
+def _write_pid():
+    os.makedirs(os.path.dirname(PID_FILE), exist_ok=True)
+    open(PID_FILE, "w").write(str(os.getpid()))
+
+
+def _cleanup_pid():
+    try:
+        os.remove(PID_FILE)
+    except OSError:
+        pass
 
 
 def main():
@@ -314,6 +447,12 @@ def main():
     if not api_key:
         L.error("ANTHROPIC_API_KEY nicht gesetzt!")
         sys.exit(1)
+
+    _kill_existing()
+    _write_pid()
+
+    import atexit
+    atexit.register(_cleanup_pid)
 
     L.info("App startet...")
     app = PokerTrainerApp()

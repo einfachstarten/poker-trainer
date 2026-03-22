@@ -62,7 +62,7 @@ Der gecoachte Spieler sitzt unten am Tisch (dort wo die Aktionsbuttons sind).
 {style_prompt}
 
 AUSGABE — NUR diese 3 Zeilen, NICHTS anderes:
-REASON: 2-3 Sätze strategische Begründung inkl. Pot Odds und Equity
+REASON: 2-3 sentences strategic reasoning incl. pot odds and equity. MUST be in English.
 BOARD: Community Cards oder -
 OPPONENTS: Gegner-Aktionen z.B. "UTG raised 3x, BTN called" oder -"""
 

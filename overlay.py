@@ -5,6 +5,7 @@ from __future__ import annotations
 import log
 from AppKit import (
     NSWindow, NSView, NSTextField, NSFont, NSColor,
+    NSButton, NSBezelStyleSmallSquare,
     NSWindowStyleMaskBorderless, NSWindowStyleMaskResizable,
     NSBackingStoreBuffered,
     NSFloatingWindowLevel, NSMakeRect,
@@ -17,7 +18,8 @@ import objc
 L = log.get("overlay")
 
 WIN_W = 440
-WIN_H = 280
+WIN_H = 320
+BTN_H = 30
 MIN_W = 280
 MIN_H = 120
 GRIP_SIZE = 16
@@ -90,12 +92,26 @@ class OverlayView(NSView):
                 NSBezierPath.fillRect_(NSMakeRect(x, y, 2, 2))
 
 
+class ButtonTarget(NSView):
+    """ObjC-compatible target for button actions."""
+
+    _callback = None
+
+    def btnClicked_(self, sender):
+        if self._callback:
+            self._callback(sender.tag())
+
+
 class Overlay:
-    def __init__(self, position: dict | None = None, size: dict | None = None):
+    def __init__(self, position: dict | None = None, size: dict | None = None,
+                 on_button=None):
         self._window = None
         self._action_label = None
         self._reason_label = None
         self._hand_label = None
+        self._buttons = []
+        self._btn_target = None
+        self._on_button = on_button  # callback(tag): tag = 1=quick, 2=newround, 3=detail
         self._position = position or {"x": 50, "y": 50}
         self._size = size or {"w": WIN_W, "h": WIN_H}
         L.debug(f"Init position={self._position} size={self._size}")
@@ -153,9 +169,9 @@ class Overlay:
             NSViewWidthSizable | NSViewHeightSizable)
         content.addSubview_(self._reason_label)
 
-        # Hand/Board label (bottom, stretches with width, wraps)
+        # Hand/Board label (above buttons, stretches with width, wraps)
         self._hand_label = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(12, 10, w - 24, 40))
+            NSMakeRect(12, BTN_H + 10, w - 24, 40))
         self._hand_label.setStringValue_("")
         self._hand_label.setFont_(NSFont.fontWithName_size_("Menlo", 12))
         self._hand_label.setTextColor_(NSColor.colorWithCalibratedWhite_alpha_(0.5, 1.0))
@@ -168,6 +184,29 @@ class Overlay:
         self._hand_label.setAutoresizingMask_(
             NSViewWidthSizable | NSViewMaxYMargin)
         content.addSubview_(self._hand_label)
+
+        # Button bar (bottom)
+        self._btn_target = ButtonTarget.alloc().init()
+        self._btn_target._callback = self._on_button
+        btn_w = (w - 24 - 8) // 3  # 3 buttons with 4px gaps
+        btn_defs = [
+            (1, "⚡ Analyse"),
+            (2, "🔄 Neue Runde"),
+            (3, "📋 Detail"),
+        ]
+        for i, (tag, label) in enumerate(btn_defs):
+            x_btn = 12 + i * (btn_w + 4)
+            btn = NSButton.alloc().initWithFrame_(
+                NSMakeRect(x_btn, 6, btn_w, BTN_H))
+            btn.setTitle_(label)
+            btn.setBezelStyle_(NSBezelStyleSmallSquare)
+            btn.setFont_(NSFont.fontWithName_size_("Menlo", 11))
+            btn.setTag_(tag)
+            btn.setTarget_(self._btn_target)
+            btn.setAction_(objc.selector(ButtonTarget.btnClicked_, signature=b'v@:@'))
+            btn.setAutoresizingMask_(NSViewMaxYMargin)
+            content.addSubview_(btn)
+            self._buttons.append(btn)
 
         self._window.orderFrontRegardless()
         L.info(f"Overlay sichtbar bei ({x}, {y}), {w}x{h}")
@@ -240,8 +279,15 @@ class Overlay:
     def stop(self):
         L.info("Overlay wird geschlossen")
         if self._window:
+            w = self._window
+            self._window = None
+            self._action_label = None
+            self._reason_label = None
+            self._hand_label = None
+            self._buttons = []
+            self._btn_target = None
             def _close():
-                self._window.orderOut_(None)
+                w.orderOut_(None)
+                w.close()
             from PyObjCTools import AppHelper
             AppHelper.callAfter(_close)
-            self._window = None
