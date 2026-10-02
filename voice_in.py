@@ -47,9 +47,24 @@ class _Microphone:
             self._stream = None
 
 
+_model_path: str | None = None
+
+
+def _model() -> str:
+    """Local folder of the model once it is downloaded, so transcribing needs no network."""
+    global _model_path
+    if _model_path is None:
+        try:
+            from huggingface_hub import snapshot_download
+            _model_path = snapshot_download(WHISPER_MODEL, local_files_only=True)
+        except Exception:
+            return WHISPER_MODEL  # not cached yet: mlx-whisper downloads it
+    return _model_path
+
+
 def whisper_transcribe(audio: np.ndarray) -> str:
     import mlx_whisper
-    result = mlx_whisper.transcribe(audio, path_or_hf_repo=WHISPER_MODEL, language="de",
+    result = mlx_whisper.transcribe(audio, path_or_hf_repo=_model(), language="de",
                                     initial_prompt=VOCABULARY, condition_on_previous_text=False)
     return result["text"]
 

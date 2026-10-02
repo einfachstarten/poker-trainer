@@ -74,6 +74,7 @@ def parse_markers(markers: list[str]) -> dict:
             changes = {}
             for arg in args:
                 key, _, value = arg.partition("=")
+                key = "tightness" if key == "handauswahl" else key
                 if key in ("tightness", "aggression", "bluff") and value.isdigit():
                     changes[key] = int(value)
             if changes:

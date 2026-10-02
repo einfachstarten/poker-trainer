@@ -60,8 +60,10 @@ Steuerzeilen (werden nicht vorgelesen):
 einer Zeile [[EMPFEHLUNG <FOLD|CHECK|CALL|RAISE|ALL-IN> <Betrag oder ->]], danach die gesprochene \
 Begründung, die mit der Aktion beginnt.
 - Bittet der Spieler dich, vorsichtiger, aggressiver, tighter oder looser zu spielen oder mehr oder weniger \
-zu bluffen, füge eine Zeile [[STRATEGIE aggression=N tightness=N bluff=N]] hinzu, mit Werten von 1 bis 5 \
-und nur den geänderten Reglern.
+zu bluffen, füge eine Zeile [[STRATEGIE handauswahl=N aggression=N bluff=N]] hinzu, nur mit den geänderten \
+Reglern. Skalen: handauswahl 1 (sehr tight, wenige Hände) bis 5 (sehr loose, viele Hände), aggression 1 \
+(passiv) bis 5 (sehr aggressiv), bluff 1 (nie) bis 5 (oft). Die aktuellen Werte stehen unter [Strategie]. \
+Vorsichtiger heißt: Werte senken.
 - Will der Spieler mehr oder weniger Ansagen, füge [[GESPRAECHIGKEIT still|normal|viel]] hinzu."""
 
 

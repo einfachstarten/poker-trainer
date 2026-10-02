@@ -140,6 +140,14 @@ class CompanionTest(unittest.TestCase):
         self.assertEqual(self.speaker.said, ["Gut, ich nehme Tempo raus."])
         self.assertEqual(self.view.model["transcript"][0], {"who": "you", "text": "spiel bitte vorsichtiger"})
 
+    def test_question_without_a_table_still_carries_the_strategy(self):
+        c = self.make("Klar.")
+        c._converse("spiel vorsichtiger")
+        prompt = self.backend.prompts[0]
+        self.assertIn("[FRAGE]", prompt)
+        self.assertIn("Handauswahl 2/5", prompt)
+        self.assertIn("Aggression 3/5", prompt)
+
     def test_talking_cuts_the_coach_off(self):
         c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")
         stopped = []

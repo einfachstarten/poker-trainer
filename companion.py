@@ -263,7 +263,7 @@ class Companion:
 
     def _context(self, state: TableState | None, sit: Situation | None) -> str:
         if state is None or sit is None:
-            return "[Tisch]\nNoch nichts erkannt."
+            return f"[Tisch]\nNoch nichts erkannt.\n[Strategie]\n{self.profile.describe()}"
         lines = ["[Tisch]", self.tracker.summary()]
         if sit.equity is not None:
             required = equity.required_equity(sit.pot, sit.to_call)

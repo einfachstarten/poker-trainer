@@ -37,6 +37,11 @@ class ParseMarkersTest(unittest.TestCase):
         m = parse_markers(["STRATEGIE aggression=2 bluff=1"])
         self.assertEqual(m["strategy"], {"aggression": 2, "bluff": 1})
 
+    def test_hand_selection_dial_has_a_german_name(self):
+        # "tightness" reads as "higher is tighter" to the model, the scale runs the other way
+        self.assertEqual(parse_markers(["STRATEGIE handauswahl=1 bluff=1"])["strategy"],
+                         {"tightness": 1, "bluff": 1})
+
     def test_unknown_marker_is_ignored(self):
         self.assertEqual(parse_markers(["QUATSCH 1"]), {})
 
