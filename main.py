@@ -13,7 +13,7 @@ import threading
 import time
 import urllib.request
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 REPO = "einfachstarten/poker-trainer"
 PID_FILE = os.path.expanduser("~/.poker-trainer/poker-trainer.pid")
 APP_DIR = os.path.dirname(os.path.abspath(__file__))

@@ -1,0 +1,30 @@
+# Exact versions inside the app bundle, installed by build_app.sh without
+# dependency resolution. Bump deliberately and rebuild.
+altgraph==0.17.5
+annotated-types==0.7.0
+anthropic==0.85.0
+anyio==4.12.1
+certifi==2026.2.25
+distro==1.9.0
+docstring-parser==0.17.0
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.20
+jiter==0.13.0
+macholib==1.16.4
+modulegraph==0.19.7
+numpy==2.4.3
+packaging==26.0
+pillow==12.1.1
+py2app==0.28.10
+pydantic==2.12.5
+pydantic-core==2.41.5
+pyobjc-core==12.2.2
+pyobjc-framework-cocoa==12.2.2
+pyobjc-framework-quartz==12.2.2
+rumps==0.4.0
+setuptools==82.0.1
+sniffio==1.3.1
+typing-extensions==4.15.0
+typing-inspection==0.4.2

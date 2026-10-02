@@ -1,0 +1,60 @@
+name: App bauen
+
+# Baut die App für Intel und Apple-Chip auf je einem frischen Mac, startet sie
+# dort und hängt die DMGs bei einem Release-Tag an das Release.
+on:
+  push:
+    tags: ['v*']
+    branches: ['build/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15-intel, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+
+      - name: App bauen und prüfen
+        run: |
+          sw_vers
+          uname -m
+          ./build_app.sh
+
+      - name: Starttest
+        run: |
+          mkdir -p ~/.poker-trainer
+          echo '{"api_key": "sk-ant-nur-fuer-den-starttest"}' > ~/.poker-trainer/config.json
+          open "dist/Poker Trainer.app"
+          for i in $(seq 1 30); do
+            grep -q "App startet" /tmp/poker-trainer.log 2>/dev/null && break
+            sleep 2
+          done
+          sleep 10
+          cat /tmp/poker-trainer.log || true
+          if ! pgrep -f "Poker Trainer.app/Contents/MacOS/Poker Trainer" >/dev/null; then
+            echo "Die App läuft nicht. Start im Vordergrund für die Fehlermeldung:"
+            "dist/Poker Trainer.app/Contents/MacOS/Poker Trainer" &
+            sleep 15
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Installation-${{ matrix.os }}
+          path: dist/Installation/
+
+      - name: DMG an das Release hängen
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "Poker Trainer $GITHUB_REF_NAME" 2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" dist/Installation/*.dmg --clobber

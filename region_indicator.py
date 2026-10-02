@@ -144,6 +144,8 @@ class RegionIndicator:
             frame, NSWindowStyleMaskBorderless, NSBackingStoreBuffered, False,
         )
         self._window.setLevel_(NSStatusWindowLevel)
+        # Python keeps its own reference: without this, close() releases the window a second time.
+        self._window.setReleasedWhenClosed_(False)
         self._window.setOpaque_(False)
         self._window.setBackgroundColor_(NSColor.clearColor())
         self._window.setHasShadow_(False)

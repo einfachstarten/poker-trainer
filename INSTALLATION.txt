@@ -3,9 +3,13 @@ Poker Trainer installieren
 
 Voraussetzungen
 
-- Mac mit Apple-Chip (M1 oder neuer)
-- macOS 26 oder neuer
+- Mac mit @CHIP@
+- macOS @MACOS@ oder neuer
 - Internetverbindung
+
+Die App läuft nur auf dem Chip, für den sie gebaut ist. Welcher Chip im Mac
+steckt und welches macOS läuft, steht unter Apple-Menü > "Über diesen Mac":
+"Chip: Apple M..." oder "Prozessor: ... Intel ...".
 
 Homebrew, Python oder Git werden nicht gebraucht. Alles steckt in der App.
 
@@ -20,6 +24,7 @@ Bei AirDrop liegt sie danach im Ordner "Downloads".
 
 - Doppelklick auf die DMG-Datei. Es öffnet sich ein Fenster.
 - "Poker Trainer" auf den Ordner "Applications" (Programme) ziehen.
+  Liegt dort schon eine ältere Version: "Ersetzen" wählen.
 - Fenster schließen und das Laufwerk "Poker Trainer" im Finder auswerfen.
 
 
@@ -44,6 +49,7 @@ Weg b) Systemeinstellungen
 "Systemeinstellungen" > "Datenschutz & Sicherheit" öffnen und nach unten
 scrollen. Dort steht, dass "Poker Trainer" blockiert wurde. Auf "Dennoch öffnen"
 klicken und mit Passwort oder Touch ID bestätigen.
+(macOS 12: "Systemeinstellungen" > "Sicherheit" > "Allgemein".)
 
 
 4. Bildschirmaufnahme erlauben
@@ -56,6 +62,8 @@ klicken und mit Passwort oder Touch ID bestätigen.
   "Poker Trainer" einschalten.
   Fehlt "Poker Trainer" in der Liste: auf "+" klicken und die App im Ordner
   "Programme" auswählen.
+  (macOS 13 und 14: Der Punkt heißt "Bildschirmaufnahme". macOS 12:
+  "Systemeinstellungen" > "Sicherheit" > "Datenschutz" > "Bildschirmaufnahme".)
 - macOS bietet danach an, Poker Trainer zu beenden und erneut zu öffnen.
   Das bestätigen. Sonst von Hand: ♠️ > "Quit", dann die App wieder starten.
 
@@ -95,16 +103,19 @@ lädt sie und startet Poker Trainer neu. Die Berechtigungen bleiben erhalten.
 
 API Key
 
-In der Datei "Poker Trainer (mit Key).dmg" ist der API Key schon enthalten. Er
+Steht im Namen der DMG-Datei "mit-Key", ist der API Key schon enthalten. Er
 wird beim ersten Start automatisch eingerichtet. Diese Datei deshalb nur
 persönlich weitergeben und nirgends hochladen.
 
-Die Datei "Poker Trainer.dmg" enthält keinen Key. Dann fragt die App beim
-ersten Start danach: den Key kopieren und auf "Key übernehmen" klicken.
+Ohne "mit-Key" im Namen fragt die App beim ersten Start nach dem Key: den Key
+kopieren und auf "Key übernehmen" klicken.
 
 
 Wenn etwas nicht geht
 
+- "Du kannst diese Version des Programms nicht mit dieser Version von macOS
+  verwenden" oder "wird von diesem Mac nicht unterstützt": Die DMG passt nicht
+  zum Mac. Chip und macOS mit den Voraussetzungen oben vergleichen.
 - Poker Trainer schreibt ein Protokoll in die Datei /tmp/poker-trainer.log.
 - Einstellungen und Key liegen in ~/.poker-trainer/config.json.
 - Entfernen: die App aus dem Ordner "Programme" löschen und den Ordner

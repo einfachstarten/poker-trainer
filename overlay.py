@@ -136,6 +136,8 @@ class Overlay:
             frame, style, NSBackingStoreBuffered, False,
         )
         self._window.setLevel_(NSFloatingWindowLevel)
+        # Python keeps its own reference: without this, close() releases the window a second time.
+        self._window.setReleasedWhenClosed_(False)
         self._window.setOpaque_(False)
         self._window.setAlphaValue_(0.92)
         self._window.setBackgroundColor_(NSColor.clearColor())
