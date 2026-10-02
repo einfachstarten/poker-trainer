@@ -4,19 +4,27 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import urllib.request
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 REPO = "einfachstarten/poker-trainer"
 PID_FILE = os.path.expanduser("~/.poker-trainer/poker-trainer.pid")
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# Inside the app bundle (see launcher.py) an update is downloaded to UPDATE_DIR
+# instead of pulled with git, and the app restarts through its own executable.
+BUNDLE_EXE = os.environ.get("EXECUTABLEPATH") if getattr(sys, "frozen", False) else None
+UPDATE_DIR = os.path.expanduser("~/.poker-trainer/app")
 
 import rumps
+from AppKit import NSApplication, NSPasteboard, NSPasteboardTypeString
+from PyObjCTools import AppHelper
 from Quartz import (
     CGEventMaskBit, kCGEventKeyDown,
     CGEventGetIntegerValueField, kCGKeyboardEventKeycode,
@@ -24,6 +32,8 @@ from Quartz import (
     kCGEventTapOptionListenOnly,
     CFMachPortCreateRunLoopSource, CFRunLoopGetCurrent,
     CFRunLoopAddSource, kCFRunLoopCommonModes, CFRunLoopRun,
+    CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess,
+    CGPreflightListenEventAccess, CGRequestListenEventAccess,
 )
 
 import log
@@ -61,6 +71,8 @@ class PokerTrainerApp(rumps.App):
         self._region_editing = False
         self._analyzing = False
         self._detailing = False
+        self._capture_hint_shown = False
+        self._latest_tag = None
 
         self._current_style = self.cfg.get("play_style", analyzer.DEFAULT_STYLE)
         current_name = analyzer.PLAY_STYLES.get(self._current_style, {}).get("name", "TAG")
@@ -92,7 +104,7 @@ class PokerTrainerApp(rumps.App):
         else:
             L.info("Toggle → Start")
             self.start_monitoring()
-            sender.title = "Stop"
+            sender.title = "Stop" if self.running else "Start"
 
     def new_region(self, _):
         L.info("Neue Region angefordert")
@@ -160,6 +172,21 @@ class PokerTrainerApp(rumps.App):
             )
             return
 
+        # Without this permission every capture only shows the desktop. Hint
+        # once per session; a second click on Start goes ahead regardless.
+        if not CGPreflightScreenCaptureAccess() and not self._capture_hint_shown:
+            self._capture_hint_shown = True
+            L.warning("Keine Berechtigung für Bildschirmaufnahme")
+            CGRequestScreenCaptureAccess()
+            rumps.alert(
+                "Bildschirmaufnahme erlauben",
+                "Poker Trainer darf den Bildschirm noch nicht aufnehmen.\n\n"
+                "Systemeinstellungen → Datenschutz & Sicherheit → "
+                "Bildschirm- & Systemaudioaufnahme: Poker Trainer einschalten. "
+                "Danach Poker Trainer beenden und neu starten."
+            )
+            return
+
         if not config.has_region(self.cfg):
             L.info("Keine Region → öffne Selector")
             region = selector.select_region()
@@ -190,6 +217,10 @@ class PokerTrainerApp(rumps.App):
         self.running = True
         self._analyzing = False
         self._detailing = False
+
+        if not CGPreflightListenEventAccess():
+            # macOS asks once to allow the hotkeys ("Eingabeüberwachung")
+            CGRequestListenEventAccess()
 
         self._hotkey_thread = threading.Thread(target=self._listen_hotkey, daemon=True)
         self._hotkey_thread.start()
@@ -229,6 +260,7 @@ class PokerTrainerApp(rumps.App):
 
             if latest_tag and self._version_tuple(latest_tag) > self._version_tuple(VERSION):
                 L.info(f"Update verfügbar: v{latest_tag} (aktuell: v{VERSION})")
+                self._latest_tag = latest_tag
                 self._update_button.title = f"⬆ Update → v{latest_tag}"
                 self._update_button.set_callback(self._do_update)
             else:
@@ -244,33 +276,43 @@ class PokerTrainerApp(rumps.App):
             return (0,)
 
     def _do_update(self, _):
-        """Pull latest code and restart."""
+        """Install the latest code and restart."""
         L.info("Update wird durchgeführt...")
         self._update_button.title = "Updating..."
         self._update_button.set_callback(None)
 
         def _run_update():
             try:
-                result = subprocess.run(
-                    ["git", "pull", "--ff-only"],
-                    cwd=APP_DIR, capture_output=True, text=True, timeout=30,
-                )
-                if result.returncode != 0:
-                    L.error(f"git pull fehlgeschlagen: {result.stderr}")
-                    rumps.alert("Update fehlgeschlagen", result.stderr)
-                    self._update_button.title = "Update fehlgeschlagen"
-                    return
-
-                L.info(f"git pull OK: {result.stdout.strip()}")
-                rumps.alert("Update installiert", f"Poker Trainer wird neu gestartet.")
-                # Restart
-                self.stop_monitoring()
-                os.execv(sys.executable, [sys.executable] + sys.argv)
+                if BUNDLE_EXE:
+                    _download_release(self._latest_tag)
+                    L.info(f"v{self._latest_tag} nach {UPDATE_DIR} geladen")
+                else:
+                    result = subprocess.run(
+                        ["git", "pull", "--ff-only"],
+                        cwd=APP_DIR, capture_output=True, text=True, timeout=30,
+                    )
+                    if result.returncode != 0:
+                        raise RuntimeError(result.stderr)
+                    L.info(f"git pull OK: {result.stdout.strip()}")
             except Exception as e:
                 L.error(f"Update Error: {e}")
-                rumps.alert("Update fehlgeschlagen", str(e))
+                AppHelper.callAfter(self._update_failed, str(e))
+                return
+            # Alerts and the restart belong on the main thread
+            AppHelper.callAfter(self._restart_after_update)
 
         threading.Thread(target=_run_update, daemon=True).start()
+
+    def _update_failed(self, reason):
+        self._update_button.title = "Update fehlgeschlagen"
+        rumps.alert("Update fehlgeschlagen", reason)
+
+    def _restart_after_update(self):
+        rumps.alert("Update installiert", "Poker Trainer wird neu gestartet.")
+        self.stop_monitoring()
+        if BUNDLE_EXE:
+            os.execv(BUNDLE_EXE, [BUNDLE_EXE])
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     def _speak(self, text):
         """Speak text using macOS say in background."""
@@ -438,12 +480,60 @@ class PokerTrainerApp(rumps.App):
         super().terminate()
 
 
+def _download_release(tag: str):
+    """Download the code of a release and unpack it to UPDATE_DIR."""
+    url = f"https://github.com/{REPO}/archive/refs/tags/v{tag}.tar.gz"
+    req = urllib.request.Request(url, headers={"User-Agent": "PokerTrainer"})
+    tmp = UPDATE_DIR + ".new"
+    shutil.rmtree(tmp, ignore_errors=True)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        with tarfile.open(fileobj=resp, mode="r|gz") as tar:
+            tar.extractall(tmp, filter="data")
+    # GitHub wraps the files in a single folder (poker-trainer-<tag>)
+    src = os.path.join(tmp, os.listdir(tmp)[0])
+    if not os.path.exists(os.path.join(src, "main.py")):
+        raise RuntimeError(f"Kein main.py im Download von v{tag}")
+    shutil.rmtree(UPDATE_DIR, ignore_errors=True)
+    os.rename(src, UPDATE_DIR)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _ask_api_key(cfg: dict) -> str:
+    """No key configured: take it from the clipboard and store it in the config."""
+    NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+    while True:
+        clicked = rumps.alert(
+            "API Key fehlt",
+            "Kopiere den Anthropic API Key (beginnt mit sk-ant-) in die "
+            "Zwischenablage und klicke dann auf „Key übernehmen“.",
+            ok="Key übernehmen", cancel="Beenden",
+        )
+        if clicked != 1:
+            return ""
+        key = NSPasteboard.generalPasteboard().stringForType_(NSPasteboardTypeString) or ""
+        if key.strip().startswith("sk-ant-"):
+            cfg["api_key"] = key.strip()
+            config.save(cfg)
+            L.info("API Key aus der Zwischenablage gespeichert")
+            return cfg["api_key"]
+
+
+def _is_poker_trainer(pid: int) -> bool:
+    cmd = subprocess.run(["ps", "-p", str(pid), "-o", "command="],
+                         capture_output=True, text=True).stdout
+    return "Poker Trainer.app" in cmd or "main.py" in cmd
+
+
 def _kill_existing():
     """Kill any existing instance via PID file."""
     if not os.path.exists(PID_FILE):
         return
     try:
         old_pid = int(open(PID_FILE).read().strip())
+        # The file outlives quit and reboot: after a restart in place it holds
+        # our own PID, later it may point to an unrelated process.
+        if old_pid == os.getpid() or not _is_poker_trainer(old_pid):
+            return
         os.kill(old_pid, signal.SIGTERM)
         L.info(f"Alte Instanz (PID {old_pid}) beendet")
         time.sleep(0.5)
@@ -467,7 +557,7 @@ def _cleanup_pid():
 
 def main():
     cfg = config.load()
-    api_key = config.get_api_key(cfg)
+    api_key = config.get_api_key(cfg) or _ask_api_key(cfg)
 
     if not api_key:
         L.error("ANTHROPIC_API_KEY nicht gesetzt!")

@@ -11,19 +11,9 @@ import log
 L = log.get("selector")
 
 
-def _selector_script_path() -> str:
-    """Resolve path to selector.py — handle both dev mode and py2app bundle."""
-    # py2app bundle: selector.py is shipped as a resource via DATA_FILES
-    resource_path = os.environ.get("RESOURCEPATH")
-    if resource_path:
-        bundled = os.path.join(resource_path, "selector.py")
-        if os.path.exists(bundled):
-            return bundled
-    # Dev mode: alongside this module on disk
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "selector.py")
-
-
-SELECTOR_SCRIPT = _selector_script_path()
+# The app code is plain files in every setup (git checkout, app bundle,
+# downloaded update), so the script always sits next to this module.
+SELECTOR_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "selector.py")
 
 
 def select_region() -> dict | None:

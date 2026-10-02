@@ -1,0 +1,111 @@
+Poker Trainer installieren
+
+
+Voraussetzungen
+
+- Mac mit Apple-Chip (M1 oder neuer)
+- macOS 26 oder neuer
+- Internetverbindung
+
+Homebrew, Python oder Git werden nicht gebraucht. Alles steckt in der App.
+
+
+1. Datei auf den Mac bringen
+
+Die DMG-Datei aus diesem Ordner per AirDrop oder USB-Stick auf den Mac kopieren.
+Bei AirDrop liegt sie danach im Ordner "Downloads".
+
+
+2. App installieren
+
+- Doppelklick auf die DMG-Datei. Es öffnet sich ein Fenster.
+- "Poker Trainer" auf den Ordner "Applications" (Programme) ziehen.
+- Fenster schließen und das Laufwerk "Poker Trainer" im Finder auswerfen.
+
+
+3. App das erste Mal starten
+
+Im Ordner "Programme" doppelt auf "Poker Trainer" klicken.
+
+Startet die App, erscheint oben rechts in der Menüleiste ein schwarzes
+Pik-Symbol (♠️). Auf einer dunklen Menüleiste ist es schwer zu erkennen.
+Dann weiter mit Schritt 4.
+
+Meldet macOS stattdessen, dass die App nicht geöffnet werden kann, weil Apple
+sie nicht überprüfen konnte: auf "Fertig" klicken. Danach einen der beiden Wege
+gehen.
+
+Weg a) Terminal
+Das Programm "Terminal" öffnen, diese Zeile einfügen und Enter drücken:
+
+xattr -dr com.apple.quarantine "/Applications/Poker Trainer.app" && open "/Applications/Poker Trainer.app"
+
+Weg b) Systemeinstellungen
+"Systemeinstellungen" > "Datenschutz & Sicherheit" öffnen und nach unten
+scrollen. Dort steht, dass "Poker Trainer" blockiert wurde. Auf "Dennoch öffnen"
+klicken und mit Passwort oder Touch ID bestätigen.
+
+
+4. Bildschirmaufnahme erlauben
+
+- Auf ♠️ klicken, dann auf "Start".
+- Poker Trainer weist darauf hin, dass die Bildschirmaufnahme noch nicht
+  erlaubt ist.
+- "Systemeinstellungen" > "Datenschutz & Sicherheit" >
+  "Bildschirm- & Systemaudioaufnahme" öffnen und den Schalter bei
+  "Poker Trainer" einschalten.
+  Fehlt "Poker Trainer" in der Liste: auf "+" klicken und die App im Ordner
+  "Programme" auswählen.
+- macOS bietet danach an, Poker Trainer zu beenden und erneut zu öffnen.
+  Das bestätigen. Sonst von Hand: ♠️ > "Quit", dann die App wieder starten.
+
+
+5. Benutzen
+
+- Den Pokertisch öffnen.
+- ♠️ > "Start". Beim ersten Mal wird der Bildschirm abgedunkelt: mit der Maus
+  ein Rechteck über den Pokertisch ziehen.
+- Es erscheint ein kleines Fenster mit drei Knöpfen:
+  "Analyse" (F1): Empfehlung für die aktuelle Hand
+  "Neue Runde" (F2): Notizen über die Gegner zurücksetzen
+  "Detail" (F3): kurze Begründung auf Englisch, wird auch vorgelesen
+- Ein grüner Rahmen zeigt den Bereich, den Poker Trainer sieht.
+  ♠️ > "Region anpassen": Rahmen verschieben oder in der Größe ändern.
+  ♠️ > "Neue Region": Bereich neu aufziehen.
+- ♠️ > "Stil: ..." wechselt den Spielstil.
+
+
+6. Tasten F1 bis F3 erlauben (kann man auslassen)
+
+Die drei Knöpfe im Poker-Trainer-Fenster funktionieren immer. Für die Tasten
+braucht Poker Trainer eine weitere Berechtigung. macOS fragt beim ersten
+"Start" danach.
+
+- "Systemeinstellungen" > "Datenschutz & Sicherheit" > "Eingabeüberwachung"
+  öffnen und den Schalter bei "Poker Trainer" einschalten.
+- Poker Trainer beenden und neu starten.
+- Auf dem MacBook die Taste "fn" gedrückt halten, also fn + F1.
+
+
+Updates
+
+Gibt es eine neue Version, steht im Menü unter ♠️ "Update → v...". Ein Klick
+lädt sie und startet Poker Trainer neu. Die Berechtigungen bleiben erhalten.
+
+
+API Key
+
+In der Datei "Poker Trainer (mit Key).dmg" ist der API Key schon enthalten. Er
+wird beim ersten Start automatisch eingerichtet. Diese Datei deshalb nur
+persönlich weitergeben und nirgends hochladen.
+
+Die Datei "Poker Trainer.dmg" enthält keinen Key. Dann fragt die App beim
+ersten Start danach: den Key kopieren und auf "Key übernehmen" klicken.
+
+
+Wenn etwas nicht geht
+
+- Poker Trainer schreibt ein Protokoll in die Datei /tmp/poker-trainer.log.
+- Einstellungen und Key liegen in ~/.poker-trainer/config.json.
+- Entfernen: die App aus dem Ordner "Programme" löschen und den Ordner
+  ~/.poker-trainer löschen.
