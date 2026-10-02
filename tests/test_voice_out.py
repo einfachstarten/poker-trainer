@@ -1,6 +1,7 @@
 import threading
 import time
 import unittest
+import unittest.mock
 
 import voice_out
 
@@ -83,6 +84,91 @@ class SpeakerTest(unittest.TestCase):
         speaker.say("Zwei.")
         wait_until(lambda: len(calls) == 2)
         self.assertEqual(calls, ["Eins.", "Zwei."])
+
+
+
+class FakeSoundDevice:
+    def __init__(self):
+        self.played, self.stops = [], 0
+
+    def play(self, samples, rate):
+        self.played.append((list(samples), rate))
+
+    def wait(self):
+        pass
+
+    def stop(self):
+        self.stops += 1
+
+
+class SampleEngineTest(unittest.TestCase):
+    def setUp(self):
+        import sys
+        self.sd = FakeSoundDevice()
+        self._old = sys.modules.get("sounddevice")
+        sys.modules["sounddevice"] = self.sd
+        self.addCleanup(lambda: sys.modules.__setitem__("sounddevice", self._old)
+                        if self._old else sys.modules.pop("sounddevice"))
+
+    def test_speak_synthesizes_and_plays(self):
+        engine = voice_out.SampleEngine(lambda text: ([0.1, 0.2], 44100))
+        engine.speak("Hallo.")
+        self.assertEqual(self.sd.played, [([0.1, 0.2], 44100)])
+
+    def test_prepared_sentences_are_synthesized_ahead_and_only_once(self):
+        calls = []
+
+        def synth(text):
+            calls.append(text)
+            return [len(calls)], 24000
+
+        engine = voice_out.SampleEngine(synth)
+        engine.prepare("Eins.")
+        engine.prepare("Zwei.")
+        wait_until(lambda: len(calls) == 2)   # both are ready before anything is played
+        self.assertEqual(self.sd.played, [])
+        engine.speak("Eins.")
+        engine.speak("Zwei.")
+        self.assertEqual(calls, ["Eins.", "Zwei."])
+        self.assertEqual([p[0] for p in self.sd.played], [[1], [2]])
+
+    def test_stop_forgets_prepared_sentences(self):
+        calls = []
+        engine = voice_out.SampleEngine(lambda text: (calls.append(text) or [0.0], 24000))
+        engine.prepare("Alt.")
+        wait_until(lambda: calls == ["Alt."])
+        engine.stop()
+        engine.speak("Alt.")
+        self.assertEqual(calls, ["Alt.", "Alt."])  # synthesized again, the old result was dropped
+        self.assertEqual(self.sd.stops, 1)
+
+    def test_speaker_hands_sentences_to_the_engine_early(self):
+        prepared = []
+        engine = FakeEngine()
+        engine.prepare = prepared.append
+        speaker = voice_out.Speaker(engine=engine)
+        speaker.say("Eins.")
+        speaker.say("Zwei.")
+        self.assertEqual(prepared, ["Eins.", "Zwei."])
+
+
+class MakeEngineTest(unittest.TestCase):
+    def test_say_when_asked_for(self):
+        engine = voice_out.make_engine({"voice_engine": "say", "voice": "Anna"})
+        self.assertIsInstance(engine, voice_out.SayEngine)
+        self.assertEqual(engine.voice, "Anna")
+
+    def test_falls_back_to_say_without_the_neural_package(self):
+        with unittest.mock.patch.object(voice_out, "supertonic_available", lambda: False):
+            engine = voice_out.make_engine({"voice_engine": "auto", "voice": "M5"})
+        self.assertIsInstance(engine, voice_out.SayEngine)
+
+    def test_neural_voice_when_available(self):
+        with unittest.mock.patch.object(voice_out, "supertonic_available", lambda: True), \
+                unittest.mock.patch.object(voice_out, "SupertonicVoice") as voice:
+            engine = voice_out.make_engine({"voice_engine": "auto", "voice": None})
+        self.assertIsInstance(engine, voice_out.SampleEngine)
+        voice.assert_called_once_with("M5")
 
 
 if __name__ == "__main__":

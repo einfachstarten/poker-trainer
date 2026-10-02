@@ -247,7 +247,7 @@ class PokerTrainerApp(rumps.App):
 
         self.companion = companion.Companion(
             self.cfg, backend, self.view,
-            voice_out.Speaker(voice_out.SayEngine(self.cfg.get("voice"))), save_cfg=self._save_cfg,
+            voice_out.Speaker(voice_out.make_engine(self.cfg)), save_cfg=self._save_cfg,
         )
         self.companion.start()
         self.running = True

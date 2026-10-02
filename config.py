@@ -24,7 +24,8 @@ DEFAULTS = {
     "panel_frame": None,  # {"x": int, "y": int, "w": int, "h": int}
     "strategy": None,  # {"tightness": 1-5, "aggression": 1-5, "bluff": 1-5, "house_rules": str}
     "auto_speak": False,  # True: announce every recommendation, False: speak only when asked
-    "voice": None,  # macOS voice name, None = best installed German voice
+    "voice_engine": "auto",  # "auto" (neural voice if installed) | "supertonic" | "say"
+    "voice": None,  # Supertonic: F1..F5, M1..M5 (default M5). say: a macOS voice name
     "talk_keycode": 61,  # hold to talk, 61 = right Option key
     "record": False,  # save frames and readings to ~/.poker-trainer/sessions for replay
 }
