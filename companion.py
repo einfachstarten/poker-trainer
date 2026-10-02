@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import threading
 import time
 from datetime import datetime
@@ -167,8 +168,11 @@ class Companion:
     def _equity(self, state: TableState) -> float | None:
         if len(state.hero_cards) != 2:
             return None
+        # seeded per situation, so reading the same table twice shows the same number
+        seed = " ".join(state.hero_cards + state.board) + f" {state.opponents}"
         return equity.equity(state.hero_cards, state.board, state.opponents,
-                             iterations=self.cfg.get("equity_iterations", 6000))
+                             iterations=self.cfg.get("equity_iterations", 6000),
+                             rng=random.Random(seed))
 
     def _situation(self, state: TableState, eq: float | None) -> Situation:
         return Situation(

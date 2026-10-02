@@ -54,7 +54,9 @@ CONFIG_DIR="$HOME/.poker-trainer"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 mkdir -p "$CONFIG_DIR"
 
-if [ -f "$CONFIG_FILE" ] && grep -q "api_key" "$CONFIG_FILE" && ! grep -q '"api_key": ""' "$CONFIG_FILE"; then
+if command -v claude &>/dev/null || [ -x "$HOME/.local/bin/claude" ]; then
+    echo "✓ Claude Code gefunden: der Companion nutzt dein Claude-Abo (einmalig: claude auth login)"
+elif [ -f "$CONFIG_FILE" ] && grep -q "api_key" "$CONFIG_FILE" && ! grep -q '"api_key": ""' "$CONFIG_FILE"; then
     echo "✓ API Key bereits konfiguriert"
 else
     echo "Du brauchst einen Anthropic API Key."
@@ -91,7 +93,8 @@ echo "Starten mit:"
 echo "  ./run.sh"
 echo ""
 echo "Bedienung:"
-echo "  F1 = Analyse (Action, Hand, Pot Odds, Equity)"
-echo "  F2 = Neue Runde (Gegner-History löschen)"
-echo "  F3 = Detail laden (Begründung, Board, Gegner)"
+echo "  Der Companion liest den Tisch von selbst mit."
+echo "  F1 = Tisch sofort neu lesen"
+echo "  F2 = Neue Hand"
+echo "  F3 = Ansagen stumm / laut"
 echo ""

@@ -8,7 +8,7 @@ if [ ! -d ".venv" ]; then
 fi
 
 echo "♠️  Poker Trainer startet..."
-echo "  → F1 drücken zum Analysieren"
+echo "  → Menü ♠ → Start, dann 'Split anordnen'"
 echo "  → Ctrl+C zum Beenden"
 echo ""
 
