@@ -17,7 +17,7 @@ def log_decision(entry: dict) -> dict:
     """Append one companion decision (state, math, recommendation). Returns the stored entry."""
     os.makedirs(HISTORY_DIR, exist_ok=True)
     entry = {"timestamp": datetime.now().isoformat(), **entry}
-    with open(HISTORY_FILE, "a") as f:
+    with open(HISTORY_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     L.debug(f"History: {entry.get('action')} {entry.get('hand')}")
     return entry
@@ -31,7 +31,7 @@ def log_hero_action(decision: dict, hero_action: str):
         "recommended": decision.get("action"), "hero_action": hero_action,
         "followed": decision.get("action") == hero_action,
     }
-    with open(HISTORY_FILE, "a") as f:
+    with open(HISTORY_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
@@ -45,7 +45,7 @@ def get_session_stats() -> str:
     total = 0
     total_time = 0.0
 
-    with open(HISTORY_FILE) as f:
+    with open(HISTORY_FILE, encoding="utf-8") as f:
         for line in f:
             entry = json.loads(line)
             if entry.get("type") == "hero_action":

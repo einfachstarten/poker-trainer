@@ -3,9 +3,6 @@ import tempfile
 import unittest
 from unittest import mock
 
-import log
-log.setup()
-
 import history
 from companion import Companion
 
@@ -142,6 +139,20 @@ class CompanionTest(unittest.TestCase):
         self.assertEqual(c.profile.aggression, 1)
         self.assertEqual(self.speaker.said, ["Gut, ich nehme Tempo raus."])
         self.assertEqual(self.view.model["transcript"][0], {"who": "you", "text": "spiel bitte vorsichtiger"})
+
+    def test_talking_cuts_the_coach_off(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")
+        stopped = []
+        self.speaker.stop = lambda: stopped.append(True)
+        c.set_listening("listening")
+        self.assertEqual(self.view.model["status"], "Höre zu")
+        self.assertTrue(stopped)
+        self.advise(c)
+        self.assertEqual(self.speaker.said, [])  # nothing is spoken while the player talks
+        self.assertEqual(self.view.model["action"], "CALL")
+        c.set_listening("idle")
+        c._say("Jetzt wieder.")
+        self.assertEqual(self.speaker.said, ["Jetzt wieder."])
 
     def test_invalid_reading_is_not_advised(self):
         c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")

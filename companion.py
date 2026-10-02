@@ -50,6 +50,7 @@ class Companion:
         self._advice_gen = 0
         self._talk_gen = 0
         self._retried = False
+        self._listening = False
         self._hands_in_voice_session = 0
         self._frame_no = 0
         self._last_img = None
@@ -107,6 +108,19 @@ class Companion:
             self.set_strategy({k: message.get(k) for k in ("tightness", "aggression", "bluff")})
         elif message.get("type") == "ask" and message.get("text"):
             self.ask(str(message["text"]))
+
+    def set_listening(self, state: str):
+        """Push-to-talk state: 'listening', 'transcribing' or 'idle'. Talking cuts the coach off."""
+        if state == "listening":
+            self._listening = True
+            self._talk_gen += 1
+            self.speaker.stop()
+            self._update(status="Höre zu")
+        elif state == "transcribing":
+            self._update(status="Verstehe dich")
+        else:
+            self._listening = False
+            self._update(status="Schaue auf den Tisch")
 
     def ask(self, text: str):
         """A question from the player, typed or spoken."""
@@ -305,7 +319,7 @@ class Companion:
             self._save_cfg(self.cfg)
 
     def _say(self, text: str):
-        if self.talkativeness != "still":
+        if self.talkativeness != "still" and not self._listening:
             self.speaker.say(text)
 
     # --- view model ---
@@ -344,7 +358,7 @@ class Companion:
         self._frame_no += 1
         stem = os.path.join(folder, f"{datetime.now().strftime('%H%M%S')}_{self._frame_no:04d}")
         img.save(stem + ".jpg", quality=85)
-        with open(stem + ".json", "w") as f:
+        with open(stem + ".json", "w", encoding="utf-8") as f:
             json.dump(reading, f, ensure_ascii=False)
 
 

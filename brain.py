@@ -107,7 +107,7 @@ def _clean_env() -> dict:
 def cli_logged_in(binary: str) -> bool:
     try:
         out = subprocess.run([binary, "auth", "status"], capture_output=True, text=True,
-                             timeout=15, env=_clean_env()).stdout
+                             encoding="utf-8", timeout=15, env=_clean_env()).stdout
         return bool((extract_json(out) or {}).get("loggedIn"))
     except (OSError, subprocess.SubprocessError) as e:
         L.warning(f"claude auth status fehlgeschlagen: {e}")
@@ -142,7 +142,8 @@ class CliSession:
         os.makedirs(cwd, exist_ok=True)
         self._proc = subprocess.Popen(
             self._cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=open(CLAUDE_LOG, "a"), text=True, bufsize=1, env=_clean_env(), cwd=cwd)
+            stderr=open(CLAUDE_LOG, "a"), text=True, encoding="utf-8", bufsize=1,
+            env=_clean_env(), cwd=cwd)
         self.turns = 0
 
     def restart(self):

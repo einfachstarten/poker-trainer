@@ -25,7 +25,7 @@ def decisions(folder: str) -> list[tuple[TableState, Situation]]:
     """Every spot of a recorded session where the player was on turn."""
     tracker, result, rng = HandTracker(), [], random.Random(1)
     for path in sorted(glob.glob(os.path.join(folder, "*.json"))):
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             state = TableState.from_reading(json.load(f))
         if "hero_turn" not in tracker.update(state):
             continue

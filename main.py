@@ -29,8 +29,9 @@ import rumps
 from AppKit import NSApplication, NSPasteboard, NSPasteboardTypeString
 from PyObjCTools import AppHelper
 from Quartz import (
-    CGEventMaskBit, kCGEventKeyDown,
+    CGEventMaskBit, kCGEventKeyDown, kCGEventFlagsChanged,
     CGEventGetIntegerValueField, kCGKeyboardEventKeycode,
+    CGEventGetFlags, kCGEventFlagMaskAlternate,
     CGEventTapCreate, kCGSessionEventTap, kCGHeadInsertEventTap,
     kCGEventTapOptionListenOnly,
     CFMachPortCreateRunLoopSource, CFRunLoopGetCurrent,
@@ -52,6 +53,7 @@ import panel
 import selector
 import history
 import region_indicator
+import voice_in
 import voice_out
 from strategy import StrategyProfile
 
@@ -62,6 +64,7 @@ NEWROUND_CODE = 120
 NEWROUND_NAME = "F2"
 MUTE_CODE = 99
 MUTE_NAME = "F3"
+TALK_CODE = 61  # right Option key: hold to talk
 
 
 class PokerTrainerApp(rumps.App):
@@ -72,6 +75,7 @@ class PokerTrainerApp(rumps.App):
         self.running = False
         self.view = None  # panel.Panel or overlay.Overlay, whichever layout is active
         self.companion: companion.Companion | None = None
+        self.listener: voice_in.Listener | None = None
         self._hotkey_thread = None
         self.region_indicator = region_indicator.RegionIndicator(
             on_region_change=self._on_indicator_region_change,
@@ -249,6 +253,13 @@ class PokerTrainerApp(rumps.App):
         self.running = True
         L.info(f"Companion gestartet ({backend.name})")
 
+        if voice_in.available():
+            self.listener = voice_in.Listener(on_text=self.companion.ask,
+                                              on_state=self.companion.set_listening)
+            threading.Thread(target=voice_in.warm_up, daemon=True).start()
+        else:
+            L.info("Spracheingabe aus: sounddevice oder mlx-whisper nicht installiert")
+
         if not CGPreflightListenEventAccess():
             # macOS asks once to allow the hotkeys ("Eingabeüberwachung")
             CGRequestListenEventAccess()
@@ -256,7 +267,8 @@ class PokerTrainerApp(rumps.App):
         if self._hotkey_thread is None:  # one event tap for the app's lifetime
             self._hotkey_thread = threading.Thread(target=self._listen_hotkey, daemon=True)
             self._hotkey_thread.start()
-        L.info(f"Hotkeys: {HOTKEY_NAME}=Neu lesen, {NEWROUND_NAME}=Neue Hand, {MUTE_NAME}=Stumm")
+        L.info(f"Hotkeys: {HOTKEY_NAME}=Neu lesen, {NEWROUND_NAME}=Neue Hand, {MUTE_NAME}=Stumm, "
+               "rechte Option-Taste halten=Sprechen")
 
     def stop_monitoring(self):
         L.info("Stoppe Monitoring")
@@ -264,6 +276,7 @@ class PokerTrainerApp(rumps.App):
 
         self.region_indicator.hide()
 
+        self.listener = None
         if self.companion:
             self.companion.stop()
             self.companion = None
@@ -370,6 +383,14 @@ class PokerTrainerApp(rumps.App):
         def callback(proxy, event_type, event, refcon):
             keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
             active = self.companion
+            if event_type == kCGEventFlagsChanged:
+                listener = self.listener
+                if listener and keycode == self.cfg.get("talk_keycode", TALK_CODE):
+                    if CGEventGetFlags(event) & kCGEventFlagMaskAlternate:
+                        listener.press()
+                    else:
+                        listener.release()
+                return event
             if active and self.running:
                 if keycode == HOTKEY_CODE:
                     L.info(f"{HOTKEY_NAME} gedrückt: Tisch neu lesen")
@@ -381,7 +402,7 @@ class PokerTrainerApp(rumps.App):
                     L.info(f"{MUTE_NAME} gedrückt: stumm = {active.toggle_mute()}")
             return event
 
-        mask = CGEventMaskBit(kCGEventKeyDown)
+        mask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventFlagsChanged)
         tap = CGEventTapCreate(
             kCGSessionEventTap, kCGHeadInsertEventTap,
             kCGEventTapOptionListenOnly, mask, callback, None,
