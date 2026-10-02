@@ -46,7 +46,7 @@ source .venv/bin/activate
 
 # 4. Dependencies
 echo "→ Installiere Dependencies..."
-pip install --quiet anthropic Pillow numpy pyobjc-framework-Quartz pyobjc-framework-Cocoa rumps
+pip install --quiet -r requirements.txt
 
 # 5. API Key
 echo ""

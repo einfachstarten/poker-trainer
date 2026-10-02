@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Poker Companion</title>
+<link rel="stylesheet" href="panel.css">
+</head>
+<body>
+
+<header id="decision" class="wait">
+  <div id="action">Warte auf den Tisch</div>
+  <div id="decision-meta">
+    <span id="source"></span>
+    <span id="clamp-note"></span>
+  </div>
+</header>
+
+<section id="table">
+  <div class="cards-row">
+    <div class="cards-group">
+      <div class="label">Hand</div>
+      <div id="hand" class="cards"></div>
+    </div>
+    <div class="cards-group">
+      <div class="label">Board <span id="street"></span></div>
+      <div id="board" class="cards"></div>
+    </div>
+  </div>
+
+  <div id="equity-block">
+    <div class="equity-head">
+      <span>Equity <strong id="equity">-</strong></span>
+      <span>nötig <strong id="required">-</strong></span>
+    </div>
+    <div id="equity-bar"><div id="equity-fill"></div><div id="required-mark"></div></div>
+    <div class="equity-foot" id="equity-basis">gegen Zufallshände</div>
+  </div>
+
+  <dl id="numbers">
+    <div><dt>Pot</dt><dd id="pot">-</dd></div>
+    <div><dt>Call</dt><dd id="to-call">-</dd></div>
+    <div><dt>Position</dt><dd id="position">-</dd></div>
+    <div><dt>Gegner</dt><dd id="opponents-n">-</dd></div>
+  </dl>
+</section>
+
+<section>
+  <h2>Warum</h2>
+  <p id="why" class="empty">Noch keine Empfehlung.</p>
+</section>
+
+<section>
+  <h2>Gegner</h2>
+  <ul id="opponents"><li class="empty">Noch niemand beobachtet.</li></ul>
+</section>
+
+<section id="talk">
+  <h2>Gespräch</h2>
+  <ol id="transcript"></ol>
+  <form id="ask-form">
+    <input id="ask" type="text" autocomplete="off" placeholder="Frage an den Coach">
+    <button type="submit">Fragen</button>
+  </form>
+</section>
+
+<section id="strategy">
+  <h2>Strategie <span id="strategy-name"></span></h2>
+  <label>Handauswahl <span class="ends">tight / loose</span>
+    <input id="tightness" type="range" min="1" max="5" step="1" value="2"></label>
+  <label>Aggression <span class="ends">passiv / aggressiv</span>
+    <input id="aggression" type="range" min="1" max="5" step="1" value="3"></label>
+  <label>Bluffs <span class="ends">nie / oft</span>
+    <input id="bluff" type="range" min="1" max="5" step="1" value="2"></label>
+</section>
+
+<footer>
+  <span id="status">Startet</span>
+  <span id="backend"></span>
+</footer>
+
+<script src="panel.js"></script>
+</body>
+</html>

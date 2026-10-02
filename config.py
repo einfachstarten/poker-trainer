@@ -13,7 +13,19 @@ DEFAULTS = {
     "change_threshold": 0.05,
     "debounce_seconds": 1.5,
     "capture_interval": 1.0,
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-4-6",  # API fallback only
+    "backend": "auto",  # "auto" | "cli" (claude -p) | "api"
+    "brain_model": "sonnet",
+    "watch_model": "haiku",
+    "watch_width": 1200,
+    "watch_threshold": 0.003,
+    "buttons_zone": 0.18,
+    "layout": "split",  # "split" (panel next to the table) | "overlay"
+    "panel_frame": None,  # {"x": int, "y": int, "w": int, "h": int}
+    "strategy": None,  # {"tightness": 1-5, "aggression": 1-5, "bluff": 1-5, "house_rules": str}
+    "talkativeness": "normal",  # "still" | "normal" | "viel"
+    "voice": None,  # macOS voice name, None = best installed German voice
+    "record": False,  # save frames and readings to ~/.poker-trainer/sessions for replay
 }
 
 

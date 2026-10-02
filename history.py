@@ -33,6 +33,28 @@ def log_hand(tip, duration: float):
     L.debug(f"History: {tip.action} {tip.hand}")
 
 
+def log_decision(entry: dict) -> dict:
+    """Append one companion decision (state, math, recommendation). Returns the stored entry."""
+    os.makedirs(HISTORY_DIR, exist_ok=True)
+    entry = {"timestamp": datetime.now().isoformat(), **entry}
+    with open(HISTORY_FILE, "a") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    L.debug(f"History: {entry.get('action')} {entry.get('hand')}")
+    return entry
+
+
+def log_hero_action(decision: dict, hero_action: str):
+    """Append what the player actually did after a recommendation."""
+    entry = {
+        "timestamp": datetime.now().isoformat(), "type": "hero_action",
+        "hand_no": decision.get("hand_no"), "street": decision.get("street"),
+        "recommended": decision.get("action"), "hero_action": hero_action,
+        "followed": decision.get("action") == hero_action,
+    }
+    with open(HISTORY_FILE, "a") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
 def get_session_stats() -> str:
     """Get stats for current session (today)."""
     if not os.path.exists(HISTORY_FILE):
@@ -46,6 +68,8 @@ def get_session_stats() -> str:
     with open(HISTORY_FILE) as f:
         for line in f:
             entry = json.loads(line)
+            if entry.get("type") == "hero_action":
+                continue
             if entry["timestamp"].startswith(today):
                 action = entry.get("action", "?")
                 actions[action] = actions.get(action, 0) + 1

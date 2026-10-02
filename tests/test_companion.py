@@ -1,0 +1,155 @@
+import os
+import tempfile
+import unittest
+from unittest import mock
+
+import log
+log.setup()
+
+import history
+from companion import Companion
+
+READING = {
+    "hero_cards": ["Kh", "Th"], "board": ["9h", "4c", "2h"], "pot": 160, "to_call": 40,
+    "hero_stack": 1000, "hero_to_act": True, "buttons": ["Fold", "Call", "Raise"],
+    "players": [{"name": "Tilly", "stack": 554, "in_hand": True, "last_action": "bet", "dealer": False}],
+}
+
+
+class FakeBackend:
+    name = "fake"
+
+    def __init__(self, answer, reading=READING):
+        self.answer, self.reading, self.prompts = answer, reading, []
+
+    def read_table(self, img):
+        return self.reading
+
+    def new_hand(self):
+        pass
+
+    def reset_conversation(self, seed=""):
+        pass
+
+    def ask(self, text, img=None, on_delta=None, cancelled=None):
+        self.prompts.append(text)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        for i in range(0, len(self.answer), 7):  # stream in small chunks
+            on_delta(self.answer[i:i + 7])
+        return self.answer
+
+    def close(self):
+        pass
+
+
+class FakeView:
+    def __init__(self):
+        self.model = {}
+
+    def render(self, model):
+        self.model = model
+
+
+class FakeSpeaker:
+    muted = False
+
+    def __init__(self):
+        self.said = []
+
+    def say(self, text):
+        self.said.append(text)
+
+    def stop(self):
+        pass
+
+    def set_muted(self, muted):
+        self.muted = muted
+
+
+class CompanionTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        patcher = mock.patch.object(history, "HISTORY_FILE", os.path.join(self.tmp, "history.jsonl"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def make(self, answer, **cfg):
+        self.backend, self.view, self.speaker = FakeBackend(answer), FakeView(), FakeSpeaker()
+        base = {"crop_region": {"x": 0, "y": 0, "w": 10, "h": 10}, "strategy": {}}
+        base.update(cfg)
+        return Companion(base, self.backend, self.view, self.speaker)
+
+    def advise(self, companion):
+        with mock.patch("threading.Thread") as thread:  # run the advice inline
+            thread.side_effect = lambda target, args=(), daemon=None: mock.Mock(
+                start=lambda: target(*args))
+            companion._on_frame(object(), "buttons")
+
+    def test_coach_within_guard_rails_is_spoken(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall, die Odds passen. Flush Draw mit Overcards.")
+        self.advise(c)
+        m = self.view.model
+        self.assertEqual((m["action"], m["amount"], m["source"]), ("CALL", "40", "Coach"))
+        self.assertEqual(m["clamp_note"], "")
+        self.assertEqual(self.speaker.said, ["Call, die Odds passen.", "Flush Draw mit Overcards."])
+        self.assertIn("Flush Draw", m["why"])
+        self.assertEqual(m["hand"], ["Kh", "Th"])
+        self.assertAlmostEqual(m["required"], 0.2)
+
+    def test_coach_raise_beyond_profile_is_capped(self):
+        c = self.make("[[EMPFEHLUNG RAISE 200]]\nRaise, mach Druck.")
+        self.advise(c)
+        m = self.view.model
+        self.assertEqual(m["action"], "CALL")
+        self.assertEqual(m["clamp_note"], "begrenzt durch Strategie")
+        self.assertNotIn("Raise, mach Druck.", self.speaker.said)
+        self.assertTrue(self.speaker.said[0].startswith("Call 40."))
+
+    def test_brain_failure_falls_back_to_baseline(self):
+        c = self.make(RuntimeError("offline"))
+        self.advise(c)
+        m = self.view.model
+        self.assertEqual(m["action"], "CALL")
+        self.assertIn("Basis", m["source"])
+        self.assertTrue(self.speaker.said[0].startswith("Call 40."))
+
+    def test_prompt_carries_math_and_guard_rails(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")
+        self.advise(c)
+        prompt = self.backend.prompts[0]
+        for part in ("[ENTSCHEIDUNG]", "[Mathe]", "Equity", "benötigt für den Call 20 %",
+                     "Moderat aggressiv", "Raise erlaubt: nein"):
+            self.assertIn(part, prompt)
+
+    def test_quiet_mode_shows_but_does_not_speak(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.", talkativeness="still")
+        self.advise(c)
+        self.assertEqual(self.view.model["action"], "CALL")
+        self.assertEqual(self.speaker.said, [])
+
+    def test_decision_is_logged(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")
+        self.advise(c)
+        with open(history.HISTORY_FILE) as f:
+            line = f.read()
+        self.assertIn('"action": "CALL"', line)
+        self.assertIn('"baseline": "CALL"', line)
+
+    def test_spoken_strategy_change_moves_the_dials(self):
+        c = self.make("[[STRATEGIE aggression=1]]\nGut, ich nehme Tempo raus.")
+        c._converse("spiel bitte vorsichtiger")
+        self.assertEqual(c.profile.aggression, 1)
+        self.assertEqual(self.speaker.said, ["Gut, ich nehme Tempo raus."])
+        self.assertEqual(self.view.model["transcript"][0], {"who": "you", "text": "spiel bitte vorsichtiger"})
+
+    def test_invalid_reading_is_not_advised(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")
+        self.backend.reading = dict(READING, board=["Kh", "4c", "2h"])  # Kh twice
+        self.advise(c)
+        self.assertEqual(self.view.model["status"], "Tisch nicht lesbar")
+        self.assertEqual(self.backend.prompts, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
