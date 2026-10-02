@@ -22,6 +22,7 @@ import log
 L = log.get("brain")
 
 CLAUDE_LOG = "/tmp/poker-trainer-claude.log"
+EYES_TURNS_PER_SESSION = 10
 CLAUDE_CANDIDATES = ("~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude")
 
 EYES_SYSTEM = """Du liest einen Texas-Hold'em-Tisch aus einem Screenshot aus. Du gibst keine Empfehlung.
@@ -161,18 +162,24 @@ class CliSession:
                 self._spawn()
 
     def _spawn(self):
+        self._proc = self._new_process()
+        self.turns = 0
+
+    def _new_process(self) -> subprocess.Popen:
         cwd = os.path.expanduser("~/.poker-trainer")
         os.makedirs(cwd, exist_ok=True)
-        self._proc = subprocess.Popen(
+        return subprocess.Popen(
             self._cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=open(CLAUDE_LOG, "a"), text=True, encoding="utf-8", bufsize=1,
             env=_clean_env(), cwd=cwd)
-        self.turns = 0
 
     def restart(self):
+        """Fresh context. The new process starts first, so the next turn does not wait for it."""
+        fresh = self._new_process()
         with self._lock:
-            self._stop()
-            self._spawn()
+            old, self._proc = self._proc, fresh
+            self.turns = 0
+        self._end(old)
 
     def ask(self, text: str, image_b64: str | None = None, on_delta=None, cancelled=None) -> str:
         """Send one user turn and return the full answer. `on_delta(text)` gets the stream.
@@ -213,13 +220,17 @@ class CliSession:
                     return collected or str(event.get("result") or "")
             raise BrainError(f"claude-Prozess beendet, siehe {CLAUDE_LOG}")
 
-    def _stop(self):
-        if self._proc and self._proc.poll() is None:
+    @staticmethod
+    def _end(proc: subprocess.Popen | None):
+        if proc and proc.poll() is None:
             try:
-                self._proc.stdin.close()
-                self._proc.wait(timeout=3)
+                proc.stdin.close()
+                proc.wait(timeout=3)
             except (OSError, subprocess.SubprocessError):
-                self._proc.kill()
+                proc.kill()
+
+    def _stop(self):
+        self._end(self._proc)
         self._proc = None
 
     def close(self):
@@ -252,9 +263,10 @@ class CliBackend:
         return reading
 
     def new_hand(self):
-        """Old screenshots of a finished hand are dead weight: start the eyes with a fresh context."""
+        """Old screenshots are dead weight, but a fresh process answers its first question slowly.
+        So the eyes keep their context for a while and start over between hands once it has grown."""
         for session in (self._eyes, self._eyes_turn):
-            if session.turns:
+            if session.turns >= EYES_TURNS_PER_SESSION:
                 threading.Thread(target=session.restart, daemon=True).start()
 
     def ask(self, text: str, img: Image.Image | None = None, on_delta=None, cancelled=None) -> str:
