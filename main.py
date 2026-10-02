@@ -11,7 +11,7 @@ import threading
 import time
 import urllib.request
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 REPO = "einfachstarten/poker-trainer"
 PID_FILE = os.path.expanduser("~/.poker-trainer/poker-trainer.pid")
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -36,6 +36,7 @@ import analyzer
 import overlay
 import selector
 import history
+import region_indicator
 
 # F1 = 122, F2 = 120, F3 = 99
 HOTKEY_CODE = 122
@@ -54,6 +55,10 @@ class PokerTrainerApp(rumps.App):
         self.running = False
         self.overlay_win: overlay.Overlay | None = None
         self.analyzer_inst: analyzer.Analyzer | None = None
+        self.region_indicator = region_indicator.RegionIndicator(
+            on_region_change=self._on_indicator_region_change,
+        )
+        self._region_editing = False
         self._analyzing = False
         self._detailing = False
 
@@ -64,9 +69,13 @@ class PokerTrainerApp(rumps.App):
         self._update_button = rumps.MenuItem(f"Version {VERSION}", callback=None)
         self._update_button.set_callback(None)
 
+        self._edit_region_button = rumps.MenuItem("Region anpassen",
+                                                  callback=self.toggle_region_edit)
+
         self.menu = [
             rumps.MenuItem("Start", callback=self.toggle),
             rumps.MenuItem("Neue Region", callback=self.new_region),
+            self._edit_region_button,
             self._style_button,
             rumps.MenuItem("Stats", callback=self.show_stats),
             None,
@@ -104,6 +113,19 @@ class PokerTrainerApp(rumps.App):
                         break
         else:
             L.info("Region-Auswahl abgebrochen")
+
+    def toggle_region_edit(self, sender):
+        if not self.running:
+            rumps.alert("Region anpassen", "Erst auf 'Start' klicken — der Region-Rahmen wird nur im laufenden Monitoring angezeigt.")
+            return
+        self._region_editing = not self._region_editing
+        self.region_indicator.set_editing(self._region_editing)
+        sender.title = "Region fixieren" if self._region_editing else "Region anpassen"
+
+    def _on_indicator_region_change(self, region: dict):
+        self.cfg["crop_region"] = region
+        config.save(self.cfg)
+        L.info(f"Region durch Indicator-Drag aktualisiert: {region}")
 
     def _cycle_style(self, sender):
         keys = list(analyzer.PLAY_STYLES.keys())
@@ -162,6 +184,7 @@ class PokerTrainerApp(rumps.App):
             on_button=self._on_overlay_button,
         )
         self.overlay_win.start()
+        self.region_indicator.show(self.cfg["crop_region"])
         L.info("Overlay gestartet")
 
         self.running = True
@@ -175,6 +198,8 @@ class PokerTrainerApp(rumps.App):
     def stop_monitoring(self):
         L.info("Stoppe Monitoring")
         self.running = False
+
+        self.region_indicator.hide()
 
         if self.overlay_win:
             self.cfg["overlay_position"] = self.overlay_win.get_position()

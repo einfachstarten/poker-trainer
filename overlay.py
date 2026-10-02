@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import log
 from AppKit import (
-    NSWindow, NSView, NSTextField, NSFont, NSColor,
+    NSWindow, NSView, NSTextField, NSFont, NSColor, NSScreen,
     NSButton, NSBezelStyleSmallSquare,
     NSWindowStyleMaskBorderless, NSWindowStyleMaskResizable,
     NSBackingStoreBuffered,
@@ -121,6 +121,14 @@ class Overlay:
         y = self._position["y"]
         w = self._size.get("w", WIN_W)
         h = self._size.get("h", WIN_H)
+
+        # Off-screen guard: if the saved frame doesn't intersect any active
+        # NSScreen (e.g. monitor was unplugged), recenter on the main screen.
+        if not self._frame_visible(x, y, w, h):
+            main = NSScreen.mainScreen().visibleFrame()
+            x = int(main.origin.x + (main.size.width - w) / 2)
+            y = int(main.origin.y + (main.size.height - h) / 2)
+            L.warning(f"Overlay-Position off-screen, fallback auf ({x},{y})")
 
         frame = NSMakeRect(x, y, w, h)
         style = NSWindowStyleMaskBorderless | NSWindowStyleMaskResizable
@@ -264,6 +272,19 @@ class Overlay:
         from PyObjCTools import AppHelper
         AppHelper.callAfter(_do_update)
 
+    @staticmethod
+    def _frame_visible(x: int, y: int, w: int, h: int) -> bool:
+        """True if the frame overlaps any connected NSScreen by ≥80px."""
+        for s in NSScreen.screens():
+            f = s.frame()
+            ox = max(x, f.origin.x)
+            oy = max(y, f.origin.y)
+            ex = min(x + w, f.origin.x + f.size.width)
+            ey = min(y + h, f.origin.y + f.size.height)
+            if ex - ox >= 80 and ey - oy >= 80:
+                return True
+        return False
+
     def get_position(self) -> dict:
         if self._window:
             frame = self._window.frame()
@@ -286,8 +307,7 @@ class Overlay:
             self._hand_label = None
             self._buttons = []
             self._btn_target = None
-            def _close():
-                w.orderOut_(None)
-                w.close()
-            from PyObjCTools import AppHelper
-            AppHelper.callAfter(_close)
+            # Synchronous close so callers (e.g. selector launch) don't see
+            # the overlay still floating over the new full-screen picker.
+            w.orderOut_(None)
+            w.close()

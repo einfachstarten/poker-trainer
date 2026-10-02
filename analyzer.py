@@ -53,16 +53,20 @@ HAND: deine Karten
 POTODDS: z.B. 3:1 oder -
 EQUITY: z.B. 65% oder -"""
 
-DETAIL_PROMPT_TEMPLATE = """Du bist ein Poker-Coach. Quick-Analyse dieses Tisches:
+DETAIL_PROMPT_TEMPLATE = """Du bist ein Poker-Coach mit trockenem Humor. Quick-Analyse dieses Tisches:
 
 {quick_result}
 
 Der gecoachte Spieler sitzt unten am Tisch (dort wo die Aktionsbuttons sind).
+Wichtig: Auch wenn Aktionsbuttons abgeschnitten/unsichtbar sind: solange Hole Cards
+sichtbar sind, gib eine echte Empfehlung — nicht WAIT.
 
 {style_prompt}
 
-AUSGABE — NUR diese 3 Zeilen, NICHTS anderes:
-REASON: 2-3 sentences strategic reasoning incl. pot odds and equity. MUST be in English.
+AUSGABE — NUR diese 5 Zeilen, NICHTS anderes:
+ACTION: FOLD|CHECK|CALL|RAISE|ALL-IN|WAIT
+AMOUNT: Betrag oder -
+REASON: ONE punchy sentence in English, max 12 words, slightly witty/cheeky tone. State the core reason — pot odds OR hand strength OR position — pick the strongest. Examples: "Pot odds say call, math doesn't lie." / "Garbage hand, save your chips for a real fight." / "Top pair on a wet board — bet for value before they catch up."
 BOARD: Community Cards oder -
 OPPONENTS: Gegner-Aktionen z.B. "UTG raised 3x, BTN called" oder -"""
 
@@ -259,10 +263,16 @@ class Analyzer:
             L.info(f"Detail Response: {collected.strip()}")
             detail = parse_response(collected)
 
-            # Merge detail into quick tip
+            # Merge detail into quick tip. The detail prompt also re-evaluates
+            # ACTION/AMOUNT — overwrite if detail gives a real recommendation,
+            # since the quick pass often answers WAIT when buttons are clipped.
             quick.reason = detail.reason
             quick.board = detail.board
             quick.opponents = detail.opponents
+            if detail.action and detail.action not in ("?", ""):
+                quick.action = detail.action
+            if detail.amount and detail.amount != "-":
+                quick.amount = detail.amount
             quick.raw += "\n" + collected
 
             self._track_opponents(quick)

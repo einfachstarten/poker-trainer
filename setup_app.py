@@ -22,7 +22,7 @@ OPTIONS = {
         'rumps', 'PIL', 'numpy',
         'objc', 'AppKit', 'Foundation', 'Quartz', 'PyObjCTools',
         'analyzer', 'capture', 'config', 'detector', 'history',
-        'log', 'overlay', 'selector',
+        'log', 'overlay', 'selector', 'region_indicator',
     ],
 }
 

@@ -1,56 +1,26 @@
-"""Screenshot engine using macOS Quartz API (no disk I/O)."""
+"""Screenshot engine using PIL ImageGrab (wraps macOS screencapture).
+
+CGWindowListCreateImage was deprecated in macOS 14+ and frequently returns only
+the desktop wallpaper for GPU-accelerated apps (browsers, native poker clients).
+ImageGrab on macOS shells out to /usr/sbin/screencapture, which uses the modern
+ScreenCaptureKit pipeline and captures every visible app correctly.
+"""
 
 from __future__ import annotations
 
-import numpy as np
-from PIL import Image
-from Quartz import (
-    CGRectMake,
-    CGWindowListCreateImage,
-    kCGWindowListOptionOnScreenOnly,
-    kCGNullWindowID,
-    kCGWindowImageDefault,
-)
-from Quartz.CoreGraphics import (
-    CGImageGetWidth,
-    CGImageGetHeight,
-    CGImageGetBytesPerRow,
-    CGDataProviderCopyData,
-    CGImageGetDataProvider,
-)
+from PIL import Image, ImageGrab
 import log
 
 L = log.get("capture")
 
 
-def capture_region(region: dict) -> np.ndarray | None:
-    """Capture a screen region directly into a numpy array."""
-    rect = CGRectMake(region["x"], region["y"], region["w"], region["h"])
-    cg_image = CGWindowListCreateImage(
-        rect,
-        kCGWindowListOptionOnScreenOnly,
-        kCGNullWindowID,
-        kCGWindowImageDefault,
-    )
-    if cg_image is None:
-        L.warning(f"CGWindowListCreateImage returned None for {region}")
-        return None
-
-    width = CGImageGetWidth(cg_image)
-    height = CGImageGetHeight(cg_image)
-    bytes_per_row = CGImageGetBytesPerRow(cg_image)
-    data = CGDataProviderCopyData(CGImageGetDataProvider(cg_image))
-
-    arr = np.frombuffer(data, dtype=np.uint8)
-    arr = arr.reshape((height, bytes_per_row // 4, 4))
-    arr = arr[:height, :width, :]
-    return arr
-
-
 def capture_region_pil(region: dict) -> Image.Image | None:
-    """Capture a screen region and return as PIL Image."""
-    arr = capture_region(region)
-    if arr is None:
+    """Capture a screen region (global coords) and return as PIL Image."""
+    x, y, w, h = region["x"], region["y"], region["w"], region["h"]
+    bbox = (x, y, x + w, y + h)
+    try:
+        img = ImageGrab.grab(bbox=bbox, all_screens=True)
+        return img.convert("RGB")
+    except Exception as e:
+        L.warning(f"ImageGrab failed for {region}: {e}")
         return None
-    rgb = arr[:, :, [2, 1, 0]]
-    return Image.fromarray(rgb)

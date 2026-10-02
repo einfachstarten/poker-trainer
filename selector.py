@@ -10,14 +10,27 @@ import log
 
 L = log.get("selector")
 
-SELECTOR_SCRIPT = os.path.join(os.path.dirname(__file__), "selector.py")
+
+def _selector_script_path() -> str:
+    """Resolve path to selector.py — handle both dev mode and py2app bundle."""
+    # py2app bundle: selector.py is shipped as a resource via DATA_FILES
+    resource_path = os.environ.get("RESOURCEPATH")
+    if resource_path:
+        bundled = os.path.join(resource_path, "selector.py")
+        if os.path.exists(bundled):
+            return bundled
+    # Dev mode: alongside this module on disk
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "selector.py")
+
+
+SELECTOR_SCRIPT = _selector_script_path()
 
 
 def select_region() -> dict | None:
     """Launch selector as subprocess, return region dict or None."""
-    L.info("Starte Selector als Subprocess...")
+    L.info(f"Starte Selector als Subprocess: {SELECTOR_SCRIPT}")
     try:
-        venv_python = os.path.join(os.path.dirname(__file__), ".venv", "bin", "python")
+        venv_python = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "bin", "python")
         if not os.path.exists(venv_python):
             venv_python = sys.executable
 
@@ -47,69 +60,68 @@ def select_region() -> dict | None:
 # --- Standalone mode: when run as subprocess ---
 if __name__ == "__main__":
     import tkinter as tk
-    from PIL import Image, ImageTk
-    from Quartz import (
-        CGDisplayBounds, CGMainDisplayID,
-        CGRectMake, CGWindowListCreateImage,
-        kCGWindowListOptionOnScreenOnly, kCGNullWindowID, kCGWindowImageDefault,
-    )
-    from Quartz.CoreGraphics import (
-        CGImageGetWidth, CGImageGetHeight, CGImageGetBytesPerRow,
-        CGDataProviderCopyData, CGImageGetDataProvider,
-    )
-    import numpy as np
+    from Quartz import CGGetActiveDisplayList, CGDisplayBounds
 
     region_result = None
 
-    bounds = CGDisplayBounds(CGMainDisplayID())
-    sw, sh = int(bounds.size.width), int(bounds.size.height)
+    err, displays, count = CGGetActiveDisplayList(16, None, None)
+    if err != 0 or not count:
+        print("None")
+        sys.exit(0)
 
-    # Take screenshot of full screen as background
-    rect = CGRectMake(0, 0, sw, sh)
-    cg_image = CGWindowListCreateImage(
-        rect, kCGWindowListOptionOnScreenOnly, kCGNullWindowID, kCGWindowImageDefault,
-    )
-    width = CGImageGetWidth(cg_image)
-    height = CGImageGetHeight(cg_image)
-    bpr = CGImageGetBytesPerRow(cg_image)
-    data = CGDataProviderCopyData(CGImageGetDataProvider(cg_image))
-    arr = np.frombuffer(data, dtype=np.uint8).reshape((height, bpr // 4, 4))
-    arr = arr[:height, :width, [2, 1, 0]]  # BGRA → RGB
-    bg_image = Image.fromarray(arr)
-    # Resize to logical screen size (Retina)
-    bg_image = bg_image.resize((sw, sh), Image.LANCZOS)
+    bounds_list = [CGDisplayBounds(d) for d in displays[:count]]
+    min_x = int(min(b.origin.x for b in bounds_list))
+    min_y = int(min(b.origin.y for b in bounds_list))
+    max_x = int(max(b.origin.x + b.size.width for b in bounds_list))
+    max_y = int(max(b.origin.y + b.size.height for b in bounds_list))
+    union_w, union_h = max_x - min_x, max_y - min_y
 
     root = tk.Tk()
     root.title("Poker Trainer — Region wählen")
-    root.attributes("-fullscreen", True)
+    # Single-display fast path: use Tk's own screen metrics — guaranteed to
+    # match Tk's pixel grid (macOS Retina point-vs-pixel mismatches have
+    # caused the selector window to land off-center on multi-resolution setups).
+    if count == 1 and min_x == 0 and min_y == 0:
+        union_w = root.winfo_screenwidth()
+        union_h = root.winfo_screenheight()
+
+    # Order matters on macOS: size+position FIRST (while window is still
+    # decorated), then borderless + topmost + alpha. Otherwise the window
+    # manager occasionally ignores the geometry call.
+    root.geometry(f"{union_w}x{union_h}+{min_x}+{min_y}")
+    root.update_idletasks()
+    root.overrideredirect(True)
     root.attributes("-topmost", True)
+    # Semi-transparent overlay so the live poker table stays visible underneath
+    # — far more reliable than CGWindowListCreateImage, which on macOS 14+ often
+    # captures only the desktop for GPU-accelerated apps (browsers, games).
+    root.attributes("-alpha", 0.45)
     root.lift()
     root.focus_force()
+    root.update_idletasks()
+    # macOS pushes overrideredirect Tk windows below the menu bar; the canvas's
+    # on-screen origin is therefore not (min_x, min_y). Read the real position
+    # so canvas coords map back to global Quartz coords correctly.
+    real_x = root.winfo_rootx()
+    real_y = root.winfo_rooty()
 
-    canvas = tk.Canvas(root, width=sw, height=sh, highlightthickness=0, cursor="crosshair")
+    canvas = tk.Canvas(root, width=union_w, height=union_h,
+                       highlightthickness=0, cursor="crosshair", bg="#101018")
     canvas.pack(fill=tk.BOTH, expand=True)
 
-    # Show screenshot as background with dark tint
-    from PIL import ImageEnhance
-    bg_dark = ImageEnhance.Brightness(bg_image).enhance(0.5)
-    bg_tk = ImageTk.PhotoImage(bg_dark)
-    canvas.create_image(0, 0, anchor=tk.NW, image=bg_tk)
-
     canvas.create_text(
-        sw // 2, 40,
+        union_w // 2, 40,
         text="Ziehe ein Rechteck über den Poker-Tisch. ESC = Abbrechen",
         fill="white", font=("Helvetica", 20),
     )
 
-    state = {"start_x": 0, "start_y": 0, "rect_id": None, "preview_id": None}
+    state = {"start_x": 0, "start_y": 0, "rect_id": None}
 
     def on_press(event):
         state["start_x"] = event.x
         state["start_y"] = event.y
         if state["rect_id"]:
             canvas.delete(state["rect_id"])
-        if state["preview_id"]:
-            canvas.delete(state["preview_id"])
         state["rect_id"] = canvas.create_rectangle(
             event.x, event.y, event.x, event.y,
             outline="lime", width=2,
@@ -128,7 +140,13 @@ if __name__ == "__main__":
         x, y = min(x1, x2), min(y1, y2)
         w, h = abs(x2 - x1), abs(y2 - y1)
         if w > 20 and h > 20:
-            region_result = {"x": x, "y": y, "w": w, "h": h}
+            # Window-local canvas coords → global screen coords
+            region_result = {
+                "x": int(x + min_x),
+                "y": int(y + min_y),
+                "w": int(w),
+                "h": int(h),
+            }
             root.destroy()
 
     def on_escape(event):
