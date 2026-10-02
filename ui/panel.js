@@ -151,6 +151,9 @@ function update(m) {
   $("position").textContent = text(m.position);
   $("opponents-n").textContent = text(m.opponents_n);
   renderEvents(m.events);
+  $("lasthand").hidden = !m.last_hand;
+  $("last-hand").textContent = m.last_hand || "";
+  $("debrief").textContent = m.debrief || "";
   renderOpponents(m.opponents);
   renderTranscript(m.transcript);
   renderStrategy(m.strategy);

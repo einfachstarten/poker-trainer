@@ -77,6 +77,9 @@ section {
 #now { border-top: 0; padding-top: 10px; background: var(--surface); }
 #now #why { font-size: 16px; line-height: 1.4; }
 
+#lasthand p { margin: 0; font-size: 14px; }
+#lasthand #last-hand { font-weight: 600; margin-bottom: 4px; }
+
 #events { list-style: none; margin: 0; padding: 0; }
 #events li { padding: 2px 0; font-size: 14px; color: var(--muted); }
 #events li:first-child { color: var(--text); font-size: 15px; }

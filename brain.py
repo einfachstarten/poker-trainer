@@ -29,7 +29,7 @@ EYES_SYSTEM = """Du liest einen Texas-Hold'em-Tisch aus einem Screenshot aus. Du
 Antworte NUR mit einem JSON-Objekt, ohne Markdown, ohne Erklärung:
 {"hero_cards": ["5c","6s"], "board": ["7s","Qh","7c"], "pot": 10, "to_call": 0, "hero_stack": 2762,
  "hero_to_act": true, "buttons": ["Fold","Check","Raise"], "hero_dealer": false, "big_blind": 2,
- "facing_raise": false,
+ "facing_raise": false, "winner": null, "showdown": [],
  "players": [{"name": "Tilly", "stack": 554, "in_hand": true, "last_action": "check", "dealer": false}]}
 Regeln:
 - Hero sitzt unten in der Mitte, dort wo die Aktionsbuttons erscheinen. hero_cards sind seine offenen Karten.
@@ -41,6 +41,8 @@ Regeln:
 - facing_raise: preflop true, wenn vor Hero jemand erhöht hat. Sonst false. Wenn unklar: null.
 - players: alle Gegner. in_hand ist false, wenn der Spieler gefoldet hat oder keine Karten hat.
   last_action: fold, check, call, bet, raise, allin oder null.
+- winner: nur wenn die Hand entschieden ist und der Tisch den Gewinner zeigt: sein Name, "hero" für Hero. Sonst null.
+- showdown: aufgedeckte Karten der Gegner, z. B. [{"name": "Tilly", "cards": ["Qs","Qd"]}]. Sonst [].
 - Was nicht lesbar ist: null. Nicht raten."""
 
 # The turn reading skips the player list: fewer output tokens, so the answer arrives sooner.
@@ -85,6 +87,10 @@ zu bluffen, füge eine Zeile [[STRATEGIE handauswahl=N aggression=N bluff=N]] hi
 Reglern. Skalen: handauswahl 1 (sehr tight, wenige Hände) bis 5 (sehr loose, viele Hände), aggression 1 \
 (passiv) bis 5 (sehr aggressiv), bluff 1 (nie) bis 5 (oft). Die aktuellen Werte stehen unter [Strategie]. \
 Vorsichtiger heißt: Werte senken.
+- Beginnt die Nachricht mit [MANÖVERKRITIK], ist eine Hand vorbei. Sag in höchstens drei kurzen Sätzen, \
+was gut gespielt war, was der Spieler beim nächsten Mal anders machen sollte, und ob das Ergebnis eher \
+Glück oder Pech war oder aus seinen Entscheidungen folgt. Halte dich an das Protokoll der Hand: was \
+empfohlen wurde und was er tatsächlich getan hat. Keine Steuerzeile.
 - Du sprichst nur, wenn der Spieler dich fragt. Will er, dass du jede Empfehlung von selbst ansagst, \
 füge [[GESPRAECHIGKEIT normal]] hinzu, will er wieder Ruhe, [[GESPRAECHIGKEIT still]]."""
 

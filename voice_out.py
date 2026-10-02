@@ -10,7 +10,9 @@ from __future__ import annotations
 import os
 import queue
 import subprocess
+import tempfile
 import threading
+import wave
 from concurrent.futures import ThreadPoolExecutor
 
 import log
@@ -81,29 +83,48 @@ class SampleEngine:
     known, so the next one is ready when the current one has been spoken.
     """
 
-    def __init__(self, synthesize, pronunciation: dict | None = None):
+    def __init__(self, synthesize, pronunciation: dict | None = None, play=None):
         self._synthesize = synthesize
         self.pronunciation = pronunciation or {}
+        self._play = play or self._afplay
+        self._player: subprocess.Popen | None = None
         self._pool = ThreadPoolExecutor(max_workers=1)
         self._ready: dict = {}
+
+    def _afplay(self, samples, rate: int):
+        """Play through the system player. A Python audio callback stutters (loud pops) as soon
+        as the app is busy reading the table or synthesizing the next sentence."""
+        import numpy as np
+        pcm = (np.clip(np.asarray(samples, dtype=np.float32), -1.0, 1.0) * 32767).astype("<i2")
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            path = f.name
+        try:
+            with wave.open(path, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(int(rate))
+                w.writeframes(pcm.tobytes())
+            self._player = subprocess.Popen(["afplay", path])
+            self._player.wait()
+        finally:
+            os.unlink(path)
 
     def prepare(self, text: str):
         if text not in self._ready:
             self._ready[text] = self._pool.submit(self._synthesize, text)
 
     def speak(self, text: str):
-        import sounddevice
         self.prepare(text)
         samples, rate = self._ready.pop(text).result()
-        sounddevice.play(samples, rate)
-        sounddevice.wait()
+        self._play(samples, rate)
 
     def stop(self):
-        import sounddevice
         for job in self._ready.values():
             job.cancel()
         self._ready = {}
-        sounddevice.stop()
+        player = self._player
+        if player and player.poll() is None:
+            player.terminate()
 
 
 MODEL_DIR = os.path.expanduser("~/.poker-trainer/models/supertonic3")
@@ -113,7 +134,6 @@ DEFAULT_SUPERTONIC_VOICE = "M5"
 
 def supertonic_available() -> bool:
     try:
-        import sounddevice  # noqa: F401
         import supertonic  # noqa: F401
         return True
     except ImportError:

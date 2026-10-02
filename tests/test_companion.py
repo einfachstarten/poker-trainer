@@ -246,6 +246,47 @@ class CompanionTest(unittest.TestCase):
         self.assertEqual(len(self.backend.quick), reads)
         self.assertEqual(self.view.model["status"], "Tisch verdeckt, ich schaue nicht hin")
 
+    def finish_hand(self, c, **next_hand):
+        """Advise on the standard hand, then let the next hand begin."""
+        self.advise(c)
+        self.backend.answer = "Der Call war richtig, der Preis hat gepasst. Verloren hast du durch Pech."
+        self.backend.reading = dict(READING, hero_cards=["Ah", "Kd"], board=[], pot=3, to_call=0,
+                                    hero_to_act=False, buttons=[], **next_hand)
+        self.advise(c)
+
+    def test_debrief_after_each_hand(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall, der Preis passt.")
+        self.finish_hand(c, hero_stack=960)
+        prompt = self.backend.prompts[-1]
+        self.assertTrue(prompt.startswith("[MANÖVERKRITIK]"))
+        for part in ("Du hast K♥ T♥", "Empfehlung: CALL 40", "Du gehst mit.", "Du hast 40 verloren"):
+            self.assertIn(part, prompt)
+        m = self.view.model
+        self.assertIn("Der Call war richtig", m["debrief"])
+        self.assertIn("K♥ T♥", m["last_hand"])
+        self.assertIn("40 verloren", m["last_hand"])
+        with open(history.HISTORY_FILE, encoding="utf-8") as f:
+            self.assertIn('"type": "hand"', f.read())
+
+    def test_what_do_you_think_after_a_hand_speaks_the_debrief(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall, der Preis passt.")
+        self.finish_hand(c, hero_stack=960)
+        calls = len(self.backend.prompts)
+        c.think_aloud()
+        self.assertEqual(self.speaker.said, ["Der Call war richtig, der Preis hat gepasst.",
+                                             "Verloren hast du durch Pech."])
+        self.assertEqual(len(self.backend.prompts), calls)
+
+    def test_questions_carry_the_last_hand_for_discussion(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall, der Preis passt.")
+        self.finish_hand(c, hero_stack=1100)
+        self.backend.answer = "Ja."
+        c._converse("War mein Call richtig?")
+        prompt = self.backend.prompts[-1]
+        self.assertIn("[Letzte Hand]", prompt)
+        self.assertIn("Empfehlung: CALL 40", prompt)
+        self.assertIn("Du hast 100 gewonnen", prompt)
+
     def test_invalid_reading_is_not_advised(self):
         c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")
         self.backend.reading = dict(READING, board=["Kh", "4c", "2h"])  # Kh twice

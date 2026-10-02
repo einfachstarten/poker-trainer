@@ -44,6 +44,7 @@ class Companion:
         self.watcher = Watcher(
             lambda: self.cfg["crop_region"], self._dispatch,
             interval=cfg.get("watch_interval", 0.3),
+            table_gap=cfg.get("table_gap", 3.0),
             threshold=cfg.get("watch_threshold", 0.003),
             buttons_zone=cfg.get("buttons_zone", 0.18),
         )
@@ -57,6 +58,8 @@ class Companion:
         self._table_pid = None
         self._window_pid = _window_pid_under(self.cfg) if cfg.get("window_guard", True) else (lambda: None)
         self._events: list[str] = []
+        self._last_hand: dict | None = None  # record of the previous hand plus its debrief
+        self._debrief_lines: list[str] = []
         self._advice_gen = 0
         self._speak_gen = None  # the decision the player asked to hear
         self._advice_lines: list[str] = []  # what the coach would say about the open decision
@@ -101,6 +104,9 @@ class Companion:
         if self._advice_lines and self._model.get("action"):
             self._speak_gen = self._advice_gen  # sentences still streaming in are spoken too
             for line in list(self._advice_lines):
+                self.speaker.say(line)
+        elif self._debrief_lines and not (self.tracker.state and self.tracker.state.actionable):
+            for line in self._debrief_lines:  # between decisions the last hand is the topic
                 self.speaker.say(line)
         else:
             self.ask("Was denkst du?")
@@ -216,6 +222,9 @@ class Companion:
             self._last_decision = None
         if "new_hand" in events:
             self._on_new_hand()
+        finished = self.tracker.pop_finished_hand()
+        if finished:
+            threading.Thread(target=self._debrief, args=(finished,), daemon=True).start()
 
         eq = self._equity(state)
         self._show_table(state, eq)
@@ -324,6 +333,8 @@ class Companion:
             self._update(why=f"{final.note}. Der Coach wollte: {' '.join(coach)}")
         if coach:
             self._add_line("coach", " ".join(coach))
+        if base.action != "?":
+            self.tracker.note(f"Empfehlung: {final.action} {_amount(final)}".strip() + f" ({base.note})")
         self._last_decision = history.log_decision({
             "hand_no": self.tracker.hand_no, "street": state.street,
             "hand": cards.pretty_list(state.hero_cards), "board": cards.pretty_list(state.board),
@@ -335,9 +346,35 @@ class Companion:
             "reason": " ".join(coach), "response_time": round(time.time() - t0, 1),
         })
 
+    # --- after the hand ---
+
+    def _debrief(self, record: dict):
+        """Ask the coach what went well and what did not, once the hand is over."""
+        text = _hand_text(record)
+        answer = []
+        stream = MarkerStream()
+        try:
+            self.backend.ask(f"[MANÖVERKRITIK]\n{text}\n[Strategie]\n{self.profile.describe()}", None,
+                             on_delta=lambda d: answer.extend(t for k, t in stream.feed(d) if k == "sentence"))
+            answer.extend(t for k, t in stream.flush() if k == "sentence")
+        except Exception as e:
+            L.error(f"Manöverkritik fehlgeschlagen: {e}")
+        record["debrief"] = " ".join(answer)
+        self._last_hand = record
+        self._debrief_lines = answer
+        history.log_hand(record)
+        if answer:
+            self._add_line("coach", f"Hand {record['hand_no']}: {record['debrief']}")
+        self._update(last_hand=_hand_headline(record), debrief=record["debrief"])
+
     def _context(self, state: TableState | None, sit: Situation | None) -> str:
+        last = ""
+        if self._last_hand:
+            last = f"\n[Letzte Hand]\n{_hand_text(self._last_hand)}"
+            if self._last_hand.get("debrief"):
+                last += f"\nDeine Manöverkritik dazu: {self._last_hand['debrief']}"
         if state is None or sit is None:
-            return f"[Tisch]\nNoch nichts erkannt.\n[Strategie]\n{self.profile.describe()}"
+            return f"[Tisch]\nNoch nichts erkannt.\n[Strategie]\n{self.profile.describe()}{last}"
         lines = ["[Tisch]", self.tracker.summary()]
         if sit.equity is not None:
             required = equity.required_equity(sit.pot, sit.to_call)
@@ -345,7 +382,7 @@ class Companion:
             lines += ["[Mathe]", f"Equity {round(sit.equity * 100)} % gegen {sit.opponents} "
                                  f"Zufallshand/-hände{need}. Stack {fmt_amount(sit.hero_stack)}."]
         lines += ["[Strategie]", self.profile.describe(sit)]
-        return "\n".join(lines)
+        return "\n".join(lines) + last
 
     def _decision_prompt(self, state: TableState, sit: Situation, base: Recommendation) -> str:
         allowed = (f"Raise erlaubt: {'ja' if self.profile.raise_allowed(sit) else 'nein'}. "
@@ -430,6 +467,31 @@ class Companion:
         img.save(stem + ".jpg", quality=85)
         with open(stem + ".json", "w", encoding="utf-8") as f:
             json.dump(reading, f, ensure_ascii=False)
+
+
+def _result_text(record: dict) -> str:
+    delta = record.get("delta")
+    if delta is None:
+        return "Ergebnis unbekannt."
+    if delta > 0:
+        return f"Du hast {fmt_amount(delta)} gewonnen."
+    if delta < 0:
+        return f"Du hast {fmt_amount(-delta)} verloren."
+    return "Kein Gewinn, kein Verlust."
+
+
+def _hand_headline(record: dict) -> str:
+    return f"Hand {record['hand_no']} mit {cards.pretty_list(record['cards'])}: {_result_text(record)}"
+
+
+def _hand_text(record: dict) -> str:
+    """The finished hand as text for the coach: the log in order, then the result."""
+    lines = [f"[Hand {record['hand_no']}] Du hast {cards.pretty_list(record['cards'])}, "
+             f"Board am Ende {cards.pretty_list(record['board']) or '-'}."]
+    lines += record["log"]
+    lines.append(f"[Ergebnis] {_result_text(record)} Der Stand stammt vom Beginn der nächsten Hand "
+                 "und kann einen dort schon gesetzten Blind enthalten.")
+    return "\n".join(lines)
 
 
 def _window_pid_under(cfg: dict):

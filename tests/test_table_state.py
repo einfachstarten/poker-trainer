@@ -142,6 +142,47 @@ class NewsTest(unittest.TestCase):
         self.assertEqual(t.pop_news(), ["Du gehst mit."])
 
 
+class HandRecordTest(unittest.TestCase):
+    """What a finished hand looked like, for the debrief."""
+
+    def play(self):
+        t = HandTracker()
+        t.update(TableState.from_reading(reading(board=[], pot=30, to_call=20, hero_stack=1000, players=[])))
+        t.note("Empfehlung: CALL 20")
+        t.update(TableState.from_reading(reading(board=["7s", "Qh", "7c"], pot=60, to_call=0,
+                                                 hero_stack=980, hero_to_act=False, players=[])))
+        t.update(TableState.from_reading(reading(board=["7s", "Qh", "7c"], pot=60, to_call=0, hero_stack=980,
+                                                 hero_to_act=False, players=[], winner="Tilly",
+                                                 showdown=[{"name": "Tilly", "cards": ["Qs", "Qd"]}])))
+        return t
+
+    def test_nothing_finished_while_the_hand_runs(self):
+        self.assertIsNone(self.play().pop_finished_hand())
+
+    def test_record_when_the_next_hand_starts(self):
+        t = self.play()
+        t.update(TableState.from_reading(reading(hero_cards=["Ah", "Kd"], board=[], hero_stack=980,
+                                                 hero_to_act=False, players=[])))
+        rec = t.pop_finished_hand()
+        self.assertEqual(rec["hand_no"], 1)
+        self.assertEqual(rec["cards"], ["5c", "6s"])
+        self.assertEqual(rec["board"], ["7s", "Qh", "7c"])
+        self.assertEqual(rec["delta"], -20)
+        self.assertEqual(rec["winner"], "Tilly")
+        self.assertEqual(rec["showdown"], [{"name": "Tilly", "cards": ["Qs", "Qd"]}])
+        for line in ("Neue Hand. Du hast 5♣ 6♠.", "Empfehlung: CALL 20", "Du gehst mit.",
+                     "Flop: 7♠ Q♥ 7♣", "Tilly zeigt Q♠ Q♦.", "Tilly gewinnt den Pot."):
+            self.assertIn(line, rec["log"])
+        self.assertLess(rec["log"].index("Empfehlung: CALL 20"), rec["log"].index("Du gehst mit."))
+        self.assertIsNone(t.pop_finished_hand())
+        self.assertEqual(t.hand_log, ["Neue Hand. Du hast A♥ K♦."])
+
+    def test_hero_winning_is_named_as_such(self):
+        t = HandTracker()
+        t.update(TableState.from_reading(reading(players=[], winner="You")))
+        self.assertIn("Du gewinnst den Pot.", t.pop_news())
+
+
 class HeroActionTest(unittest.TestCase):
     def turn(self, **kw):
         t = HandTracker()

@@ -87,33 +87,15 @@ class SpeakerTest(unittest.TestCase):
 
 
 
-class FakeSoundDevice:
-    def __init__(self):
-        self.played, self.stops = [], 0
-
-    def play(self, samples, rate):
-        self.played.append((list(samples), rate))
-
-    def wait(self):
-        pass
-
-    def stop(self):
-        self.stops += 1
-
-
 class SampleEngineTest(unittest.TestCase):
     def setUp(self):
-        import sys
-        self.sd = FakeSoundDevice()
-        self._old = sys.modules.get("sounddevice")
-        sys.modules["sounddevice"] = self.sd
-        self.addCleanup(lambda: sys.modules.__setitem__("sounddevice", self._old)
-                        if self._old else sys.modules.pop("sounddevice"))
+        self.played = []
+        self.play = lambda samples, rate: self.played.append((list(samples), rate))
 
     def test_speak_synthesizes_and_plays(self):
-        engine = voice_out.SampleEngine(lambda text: ([0.1, 0.2], 44100))
+        engine = voice_out.SampleEngine(lambda text: ([0.1, 0.2], 44100), play=self.play)
         engine.speak("Hallo.")
-        self.assertEqual(self.sd.played, [([0.1, 0.2], 44100)])
+        self.assertEqual(self.played, [([0.1, 0.2], 44100)])
 
     def test_prepared_sentences_are_synthesized_ahead_and_only_once(self):
         calls = []
@@ -122,25 +104,46 @@ class SampleEngineTest(unittest.TestCase):
             calls.append(text)
             return [len(calls)], 24000
 
-        engine = voice_out.SampleEngine(synth)
+        engine = voice_out.SampleEngine(synth, play=self.play)
         engine.prepare("Eins.")
         engine.prepare("Zwei.")
         wait_until(lambda: len(calls) == 2)   # both are ready before anything is played
-        self.assertEqual(self.sd.played, [])
+        self.assertEqual(self.played, [])
         engine.speak("Eins.")
         engine.speak("Zwei.")
         self.assertEqual(calls, ["Eins.", "Zwei."])
-        self.assertEqual([p[0] for p in self.sd.played], [[1], [2]])
+        self.assertEqual([p[0] for p in self.played], [[1], [2]])
 
     def test_stop_forgets_prepared_sentences(self):
         calls = []
-        engine = voice_out.SampleEngine(lambda text: (calls.append(text) or [0.0], 24000))
+        engine = voice_out.SampleEngine(lambda text: (calls.append(text) or [0.0], 24000), play=self.play)
         engine.prepare("Alt.")
         wait_until(lambda: calls == ["Alt."])
         engine.stop()
         engine.speak("Alt.")
         self.assertEqual(calls, ["Alt.", "Alt."])  # synthesized again, the old result was dropped
-        self.assertEqual(self.sd.stops, 1)
+
+    def test_playback_goes_through_a_wav_file_and_the_system_player(self):
+        import numpy as np
+        import wave
+        seen = {}
+
+        class Proc:
+            def wait(self):
+                with wave.open(seen["path"]) as w:
+                    seen["rate"], seen["frames"] = w.getframerate(), w.getnframes()
+
+            def poll(self):
+                return 0
+
+        def popen(cmd, **kw):
+            seen["cmd"], seen["path"] = cmd[0], cmd[-1]
+            return Proc()
+
+        engine = voice_out.SampleEngine(lambda text: (np.zeros(4410, dtype=np.float32), 44100))
+        with unittest.mock.patch.object(voice_out.subprocess, "Popen", popen):
+            engine.speak("Hallo.")
+        self.assertEqual((seen["cmd"], seen["rate"], seen["frames"]), ("afplay", 44100, 4410))
 
     def test_speaker_hands_sentences_to_the_engine_early(self):
         prepared = []

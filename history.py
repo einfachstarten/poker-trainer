@@ -35,6 +35,14 @@ def log_hero_action(decision: dict, hero_action: str):
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+def log_hand(record: dict):
+    """Append a finished hand: its log, the result and the coach's debrief."""
+    os.makedirs(HISTORY_DIR, exist_ok=True)
+    entry = {"timestamp": datetime.now().isoformat(), "type": "hand", **record}
+    with open(HISTORY_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
 def get_session_stats() -> str:
     """Get stats for current session (today)."""
     if not os.path.exists(HISTORY_FILE):
@@ -48,7 +56,7 @@ def get_session_stats() -> str:
     with open(HISTORY_FILE, encoding="utf-8") as f:
         for line in f:
             entry = json.loads(line)
-            if entry.get("type") == "hero_action":
+            if entry.get("type") in ("hero_action", "hand"):
                 continue
             if entry["timestamp"].startswith(today):
                 action = entry.get("action", "?")

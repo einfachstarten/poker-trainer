@@ -64,6 +64,8 @@ class TableState:
     big_blind: float | None = None
     facing_raise: bool | None = None
     opponents_hint: int | None = None  # quick readings count the opponents instead of listing them
+    winner: str | None = None  # who took the pot, "Du" for the hero; only once a hand is decided
+    showdown: list[dict] = field(default_factory=list)  # [{"name": ..., "cards": [...]}]
     valid: bool = True
 
     @classmethod
@@ -91,6 +93,17 @@ class TableState:
         # Only the button is read off the table. Other positions need the seat order,
         # which a single screenshot reading does not give reliably.
         position = "BTN" if data.get("hero_dealer") is True else None
+        winner = data.get("winner")
+        if isinstance(winner, str) and winner.strip():
+            winner = "Du" if winner.strip().lower() in ("hero", "you", "du", "ich") else winner.strip()
+        else:
+            winner = None
+        showdown = []
+        for shown in data.get("showdown") or []:
+            if isinstance(shown, dict) and shown.get("name"):
+                shown_cards = cards.normalize_cards(shown.get("cards"))
+                if len(shown_cards) == 2:
+                    showdown.append({"name": str(shown["name"]), "cards": shown_cards})
         facing = data.get("facing_raise")
         return cls(
             hero_cards=hero, board=board, street=STREETS.get(len(board), "preflop"),
@@ -101,6 +114,7 @@ class TableState:
             big_blind=_num(data.get("big_blind")),
             facing_raise=facing if isinstance(facing, bool) else None,
             opponents_hint=int(hint) if (hint := _num(data.get("opponents_in_hand"))) else None,
+            winner=winner, showdown=showdown,
             valid=valid,
         )
 
@@ -140,7 +154,12 @@ class HandTracker:
         self.timeline: list[dict] = []
         self.players: list[Player] = []  # last full reading of the table
         self.state: TableState | None = None
+        self.hand_log: list[str] = []  # everything about the running hand, oldest first
         self._news: list[str] = []
+        self._start_stack: float | None = None
+        self._winner: str | None = None
+        self._showdown: list[dict] = []
+        self._finished: dict | None = None
         self._cards: list[str] | None = None
         self._board: list[str] = []
         self._street: str | None = None
@@ -161,7 +180,12 @@ class HandTracker:
         events = []
         if len(state.hero_cards) == 2 and self._is_new_hand(state):
             self._resolve_hero_action(state, hand_ended=True)
+            if self.hand_no:
+                self._finish_hand(state)
             self.hand_no += 1
+            self.hand_log = []
+            self._start_stack = state.hero_stack
+            self._winner, self._showdown = None, []
             self._cards = list(state.hero_cards)
             self._street = None
             self._last_turn_key = None
@@ -170,7 +194,7 @@ class HandTracker:
             self._hand_players.clear()
             self.timeline = []
             events.append("new_hand")
-            self._news.append(f"Neue Hand. Du hast {cards.pretty_list(state.hero_cards)}.")
+            self._tell(f"Neue Hand. Du hast {cards.pretty_list(state.hero_cards)}.")
         elif len(state.hero_cards) == 2:
             self._cards = list(state.hero_cards)  # corrected misread within the same hand
         else:
@@ -181,7 +205,7 @@ class HandTracker:
                 events.append("street")
                 if state.board:
                     fresh = state.board[len(self._board):] if state.street != "flop" else state.board
-                    self._news.append(f"{STREET_NAMES[state.street]}: {cards.pretty_list(fresh)}")
+                    self._tell(f"{STREET_NAMES[state.street]}: {cards.pretty_list(fresh)}")
             self._street = state.street
         self._board = list(state.board)
 
@@ -192,7 +216,8 @@ class HandTracker:
             self._pending_turn = state
             events.append("hero_turn")
             price = f"Mitgehen kostet {fmt_amount(state.to_call)}." if state.to_call else "Check ist gratis."
-            self._news.append(f"Du bist dran. {price}")
+            self._tell(f"Du bist dran. {price}")
+        self._note_result(state)
 
         entry = {"street": state.street, "pot": state.pot, "to_call": state.to_call,
                  "actions": {p.name: p.last_action for p in state.players if p.last_action}}
@@ -224,7 +249,7 @@ class HandTracker:
                 if key not in self._seen_actions:
                     self._seen_actions.add(key)
                     stats[p.last_action] += 1
-                    self._news.append(f"{p.name} {ACTION_WORDS[p.last_action]}.")
+                    self._tell(f"{p.name} {ACTION_WORDS[p.last_action]}.")
 
     def _resolve_hero_action(self, state: TableState, hand_ended: bool):
         """Infer what the hero did after the last advised turn from the stack change."""
@@ -235,8 +260,9 @@ class HandTracker:
                 and state.to_call == turn.to_call:
             return  # still the same decision
         action = None
-        if turn.hero_stack is not None and state.hero_stack is not None and not hand_ended:
-            paid = turn.hero_stack - state.hero_stack
+        known = turn.hero_stack is not None and state.hero_stack is not None
+        paid = turn.hero_stack - state.hero_stack if known else None
+        if known and not hand_ended:
             if paid > turn.to_call + 0.01:
                 action = "RAISE"
             elif turn.to_call and abs(paid - turn.to_call) <= 0.01:
@@ -246,13 +272,56 @@ class HandTracker:
                     action = "FOLD"
                 elif not turn.to_call:
                     action = "CHECK"
+        elif hand_ended and known:
+            # The next deal shows the stack after the whole hand: unchanged means the hero got out,
+            # exactly the call amount less means he called and lost. Anything else stays open.
+            if abs(paid) <= 0.01:
+                action = "FOLD" if turn.to_call else "CHECK"
+            elif turn.to_call and abs(paid - turn.to_call) <= 0.01:
+                action = "CALL"
+            elif turn.to_call:
+                self._tell("Du bist in der Hand geblieben.")
         elif hand_ended and turn.to_call:
             action = "FOLD"
         if action or hand_ended:
             self._hero_action = action
             self._pending_turn = None
             if action:
-                self._news.append(HERO_WORDS[action])
+                self._tell(HERO_WORDS[action])
+
+    def _tell(self, line: str):
+        self._news.append(line)
+        self.hand_log.append(line)
+
+    def note(self, line: str):
+        """Add a line to the hand's log that is not table news, e.g. what was recommended."""
+        self.hand_log.append(line)
+
+    def _note_result(self, state: TableState):
+        for shown in state.showdown:
+            if shown not in self._showdown:
+                self._showdown.append(shown)
+                self._tell(f"{shown['name']} zeigt {cards.pretty_list(shown['cards'])}.")
+        if state.winner and state.winner != self._winner:
+            self._winner = state.winner
+            self._tell("Du gewinnst den Pot." if state.winner == "Du" else f"{state.winner} gewinnt den Pot.")
+
+    def _finish_hand(self, next_state: TableState):
+        """Close the record of the hand that just ended. The stack is read off the next deal,
+        so the difference can include a blind the hero has already posted there."""
+        delta = None
+        if self._start_stack is not None and next_state.hero_stack is not None:
+            delta = next_state.hero_stack - self._start_stack
+        self._finished = {
+            "hand_no": self.hand_no, "cards": list(self._cards or []), "board": list(self._board),
+            "log": list(self.hand_log), "start_stack": self._start_stack,
+            "end_stack": next_state.hero_stack, "delta": delta,
+            "winner": self._winner, "showdown": list(self._showdown),
+        }
+
+    def pop_finished_hand(self) -> dict | None:
+        finished, self._finished = self._finished, None
+        return finished
 
     def pop_news(self) -> list[str]:
         """What happened since the last call, in plain words, oldest first."""
