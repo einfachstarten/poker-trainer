@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -83,8 +84,46 @@ class CompanionTest(unittest.TestCase):
                 start=lambda: target(*args))
             companion._on_frame(object(), "buttons")
 
-    def test_coach_within_guard_rails_is_spoken(self):
+    def test_advice_is_shown_but_not_spoken_unasked(self):
         c = self.make("[[EMPFEHLUNG CALL 40]]\nCall, die Odds passen. Flush Draw mit Overcards.")
+        self.advise(c)
+        self.assertEqual(self.view.model["action"], "CALL")
+        self.assertIn("Flush Draw", self.view.model["why"])
+        self.assertEqual(self.speaker.said, [])
+
+    def test_what_do_you_think_speaks_the_open_advice(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall, die Odds passen. Flush Draw mit Overcards.")
+        self.advise(c)
+        c.think_aloud()
+        self.assertEqual(self.speaker.said, ["Call, die Odds passen.", "Flush Draw mit Overcards."])
+        self.assertEqual(len(self.backend.prompts), 1)  # no second trip to the coach
+
+    def test_what_do_you_think_speaks_the_capped_advice(self):
+        c = self.make("[[EMPFEHLUNG RAISE 200]]\nRaise, mach Druck.")
+        self.advise(c)
+        c.think_aloud()
+        self.assertEqual(len(self.speaker.said), 1)
+        self.assertTrue(self.speaker.said[0].startswith("Call 40."))
+
+    def test_what_do_you_think_without_a_decision_asks_the_coach(self):
+        c = self.make("Gerade passiert nichts, wir warten auf Karten.")
+        c.think_aloud()
+        for _ in range(100):
+            if self.speaker.said:
+                break
+            time.sleep(0.01)
+        self.assertEqual(self.speaker.said, ["Gerade passiert nichts, wir warten auf Karten."])
+        self.assertIn("[FRAGE]", self.backend.prompts[0])
+
+    def test_panel_button_triggers_what_do_you_think(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")
+        self.advise(c)
+        c.on_view_message({"type": "think"})
+        self.assertEqual(self.speaker.said, ["Call."])
+
+    def test_coach_within_guard_rails_is_spoken(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall, die Odds passen. Flush Draw mit Overcards.",
+                      auto_speak=True)
         self.advise(c)
         m = self.view.model
         self.assertEqual((m["action"], m["amount"], m["source"]), ("CALL", "40", "Coach"))
@@ -95,7 +134,7 @@ class CompanionTest(unittest.TestCase):
         self.assertAlmostEqual(m["required"], 0.2)
 
     def test_coach_raise_beyond_profile_is_capped(self):
-        c = self.make("[[EMPFEHLUNG RAISE 200]]\nRaise, mach Druck.")
+        c = self.make("[[EMPFEHLUNG RAISE 200]]\nRaise, mach Druck.", auto_speak=True)
         self.advise(c)
         m = self.view.model
         self.assertEqual(m["action"], "CALL")
@@ -104,7 +143,7 @@ class CompanionTest(unittest.TestCase):
         self.assertTrue(self.speaker.said[0].startswith("Call 40."))
 
     def test_brain_failure_falls_back_to_baseline(self):
-        c = self.make(RuntimeError("offline"))
+        c = self.make(RuntimeError("offline"), auto_speak=True)
         self.advise(c)
         m = self.view.model
         self.assertEqual(m["action"], "CALL")
@@ -119,11 +158,11 @@ class CompanionTest(unittest.TestCase):
                      "Moderat aggressiv", "Raise erlaubt: nein"):
             self.assertIn(part, prompt)
 
-    def test_quiet_mode_shows_but_does_not_speak(self):
-        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.", talkativeness="still")
-        self.advise(c)
-        self.assertEqual(self.view.model["action"], "CALL")
-        self.assertEqual(self.speaker.said, [])
+    def test_announcements_can_be_switched_on_by_voice(self):
+        c = self.make("[[GESPRAECHIGKEIT normal]]\nMach ich.")
+        c._converse("sag mir die Empfehlungen wieder an")
+        self.assertTrue(c.auto_speak)
+        self.assertTrue(c.cfg["auto_speak"])
 
     def test_decision_is_logged(self):
         c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")
@@ -149,7 +188,7 @@ class CompanionTest(unittest.TestCase):
         self.assertIn("Aggression 3/5", prompt)
 
     def test_talking_cuts_the_coach_off(self):
-        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.", auto_speak=True)
         stopped = []
         self.speaker.stop = lambda: stopped.append(True)
         c.set_listening("listening")
@@ -159,8 +198,8 @@ class CompanionTest(unittest.TestCase):
         self.assertEqual(self.speaker.said, [])  # nothing is spoken while the player talks
         self.assertEqual(self.view.model["action"], "CALL")
         c.set_listening("idle")
-        c._say("Jetzt wieder.")
-        self.assertEqual(self.speaker.said, ["Jetzt wieder."])
+        c.think_aloud()
+        self.assertEqual(self.speaker.said, ["Call."])
 
     def test_invalid_reading_is_not_advised(self):
         c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")

@@ -64,7 +64,8 @@ zu bluffen, füge eine Zeile [[STRATEGIE handauswahl=N aggression=N bluff=N]] hi
 Reglern. Skalen: handauswahl 1 (sehr tight, wenige Hände) bis 5 (sehr loose, viele Hände), aggression 1 \
 (passiv) bis 5 (sehr aggressiv), bluff 1 (nie) bis 5 (oft). Die aktuellen Werte stehen unter [Strategie]. \
 Vorsichtiger heißt: Werte senken.
-- Will der Spieler mehr oder weniger Ansagen, füge [[GESPRAECHIGKEIT still|normal|viel]] hinzu."""
+- Du sprichst nur, wenn der Spieler dich fragt. Will er, dass du jede Empfehlung von selbst ansagst, \
+füge [[GESPRAECHIGKEIT normal]] hinzu, will er wieder Ruhe, [[GESPRAECHIGKEIT still]]."""
 
 
 class BrainError(Exception):

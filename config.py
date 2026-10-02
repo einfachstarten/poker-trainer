@@ -23,7 +23,7 @@ DEFAULTS = {
     "layout": "split",  # "split" (panel next to the table) | "overlay"
     "panel_frame": None,  # {"x": int, "y": int, "w": int, "h": int}
     "strategy": None,  # {"tightness": 1-5, "aggression": 1-5, "bluff": 1-5, "house_rules": str}
-    "talkativeness": "normal",  # "still" | "normal" | "viel"
+    "auto_speak": False,  # True: announce every recommendation, False: speak only when asked
     "voice": None,  # macOS voice name, None = best installed German voice
     "talk_keycode": 61,  # hold to talk, 61 = right Option key
     "record": False,  # save frames and readings to ~/.poker-trainer/sessions for replay

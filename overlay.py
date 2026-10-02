@@ -203,7 +203,7 @@ class Overlay:
         btn_defs = [
             (1, "Neu lesen"),
             (2, "Neue Hand"),
-            (3, "Stumm"),
+            (3, "Was denkst du?"),
         ]
         for i, (tag, label) in enumerate(btn_defs):
             x_btn = 12 + i * (btn_w + 4)

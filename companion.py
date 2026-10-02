@@ -38,7 +38,8 @@ class Companion:
         else:
             # first start after the update: everyone begins on the moderate default
             self.profile = StrategyProfile()
-        self.talkativeness = cfg.get("talkativeness", "normal")
+        # Off by default: the coach speaks when asked ("Was denkst du?"), not on every decision.
+        self.auto_speak = bool(cfg.get("auto_speak", False))
         self.tracker = HandTracker()
         self.watcher = Watcher(
             lambda: self.cfg["crop_region"], self._on_frame,
@@ -48,6 +49,8 @@ class Companion:
         )
         self._lock = threading.Lock()
         self._advice_gen = 0
+        self._speak_gen = None  # the decision the player asked to hear
+        self._advice_lines: list[str] = []  # what the coach would say about the open decision
         self._talk_gen = 0
         self._retried = False
         self._listening = False
@@ -77,10 +80,15 @@ class Companion:
         self.tracker.reset_hand()
         self.watcher.force()
 
-    def toggle_mute(self) -> bool:
-        self.speaker.set_muted(not self.speaker.muted)
-        self._update()
-        return self.speaker.muted
+    def think_aloud(self):
+        """'Was denkst du?': say the advice for the open decision, or ask the coach if there is none."""
+        self.speaker.stop()
+        if self._advice_lines and self._model.get("action"):
+            self._speak_gen = self._advice_gen  # sentences still streaming in are spoken too
+            for line in list(self._advice_lines):
+                self.speaker.say(line)
+        else:
+            self.ask("Was denkst du?")
 
     def set_strategy(self, changes: dict):
         self.profile = StrategyProfile.from_dict({**self.profile.to_dict(), **changes})
@@ -104,7 +112,9 @@ class Companion:
 
     def on_view_message(self, message: dict):
         """Events from the panel page: slider moved, question typed."""
-        if message.get("type") == "strategy":
+        if message.get("type") == "think":
+            self.think_aloud()
+        elif message.get("type") == "strategy":
             self.set_strategy({k: message.get(k) for k in ("tightness", "aggression", "bluff")})
         elif message.get("type") == "ask" and message.get("text"):
             self.ask(str(message["text"]))
@@ -163,12 +173,14 @@ class Companion:
             threading.Thread(target=self._advise, args=(state, eq), daemon=True).start()
         elif not state.actionable:
             self._advice_gen += 1  # whatever was being said about the old decision is stale
+            self._advice_lines = []
             headline = "Gegner sind dran" if state.hero_cards else "Warte auf die nächste Hand"
             self._update(action=None, amount=None, clamp_note="", source="", headline=headline,
                          status="Schaue auf den Tisch")
 
     def _on_new_hand(self):
         self._advice_gen += 1
+        self._advice_lines = []
         self.backend.new_hand()
         self._hands_in_voice_session += 1
         if self._hands_in_voice_session >= HANDS_PER_VOICE_SESSION:
@@ -210,12 +222,19 @@ class Companion:
     def _advise(self, state: TableState, eq: float | None):
         self._advice_gen += 1
         gen = self._advice_gen
+        self._advice_lines = []
         t0 = time.time()
         sit = self._situation(state, eq)
         base = self._show_baseline(state, sit)
         final = base
         coach: list[str] = []
         stream = MarkerStream()
+
+        def voice(text):
+            """A line for the open decision: kept for 'Was denkst du?', spoken only if wanted."""
+            self._advice_lines.append(text)
+            if (self.auto_speak or self._speak_gen == gen) and not self._listening:
+                self.speaker.say(text)
 
         def handle(items):
             nonlocal final
@@ -227,12 +246,12 @@ class Companion:
                         self._update(action=final.action, amount=_amount(final), source="Coach",
                                      clamp_note="begrenzt durch Strategie" if final.clamped else "")
                         if final.clamped:
-                            self._say(_spoken(final))
+                            voice(_spoken(final))
                 elif gen == self._advice_gen:
                     coach.append(text)
                     self._update(why=" ".join(coach))
                     if not final.clamped:
-                        self._say(text)
+                        voice(text)
 
         try:
             self.backend.ask(self._decision_prompt(state, sit, base), None,
@@ -242,7 +261,7 @@ class Companion:
         except Exception as e:
             L.error(f"Coach nicht erreichbar, Basis-Empfehlung bleibt: {e}")
             if gen == self._advice_gen and base.action != "?":
-                self._say(_spoken(base))
+                voice(_spoken(base))
         if gen != self._advice_gen:
             return
 
@@ -314,13 +333,9 @@ class Companion:
         if parsed.get("strategy"):
             self.set_strategy(parsed["strategy"])
         if parsed.get("talkativeness") in ("still", "normal", "viel"):
-            self.talkativeness = parsed["talkativeness"]
-            self.cfg["talkativeness"] = self.talkativeness
+            self.auto_speak = parsed["talkativeness"] != "still"
+            self.cfg["auto_speak"] = self.auto_speak
             self._save_cfg(self.cfg)
-
-    def _say(self, text: str):
-        if self.talkativeness != "still" and not self._listening:
-            self.speaker.say(text)
 
     # --- view model ---
 
@@ -342,7 +357,7 @@ class Companion:
         with self._lock:
             self._model.update(changes)
             self._model.update(
-                transcript=self._transcript, muted=self.speaker.muted,
+                transcript=self._transcript,
                 strategy={"name": self.profile.name, **self.profile.to_dict()},
             )
             model = dict(self._model)

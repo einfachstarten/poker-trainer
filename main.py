@@ -62,8 +62,8 @@ HOTKEY_CODE = 122
 HOTKEY_NAME = "F1"
 NEWROUND_CODE = 120
 NEWROUND_NAME = "F2"
-MUTE_CODE = 99
-MUTE_NAME = "F3"
+THINK_CODE = 99
+THINK_NAME = "F3"
 TALK_CODE = 61  # right Option key: hold to talk
 
 
@@ -267,7 +267,7 @@ class PokerTrainerApp(rumps.App):
         if self._hotkey_thread is None:  # one event tap for the app's lifetime
             self._hotkey_thread = threading.Thread(target=self._listen_hotkey, daemon=True)
             self._hotkey_thread.start()
-        L.info(f"Hotkeys: {HOTKEY_NAME}=Neu lesen, {NEWROUND_NAME}=Neue Hand, {MUTE_NAME}=Stumm, "
+        L.info(f"Hotkeys: {HOTKEY_NAME}=Neu lesen, {NEWROUND_NAME}=Neue Hand, {THINK_NAME}=Was denkst du?, "
                "rechte Option-Taste halten=Sprechen")
 
     def stop_monitoring(self):
@@ -367,7 +367,7 @@ class PokerTrainerApp(rumps.App):
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
     def _on_overlay_button(self, tag):
-        """Handle overlay button clicks: 1=read now, 2=new hand, 3=mute."""
+        """Handle overlay button clicks: 1=read now, 2=new hand, 3=what do you think."""
         if not self.companion:
             return
         if tag == 1:
@@ -375,7 +375,7 @@ class PokerTrainerApp(rumps.App):
         elif tag == 2:
             self.companion.new_hand()
         elif tag == 3:
-            self.companion.toggle_mute()
+            self.companion.think_aloud()
 
     def _listen_hotkey(self):
         """Listen for global hotkey events via Quartz Event Tap."""
@@ -398,8 +398,9 @@ class PokerTrainerApp(rumps.App):
                 elif keycode == NEWROUND_CODE:
                     L.info(f"{NEWROUND_NAME} gedrückt: neue Hand")
                     active.new_hand()
-                elif keycode == MUTE_CODE:
-                    L.info(f"{MUTE_NAME} gedrückt: stumm = {active.toggle_mute()}")
+                elif keycode == THINK_CODE:
+                    L.info(f"{THINK_NAME} gedrückt: Was denkst du?")
+                    active.think_aloud()
             return event
 
         mask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventFlagsChanged)

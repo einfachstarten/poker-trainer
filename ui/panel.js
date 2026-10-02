@@ -135,7 +135,7 @@ function update(m) {
   renderTranscript(m.transcript);
   renderStrategy(m.strategy);
   $("status").textContent = m.status || "";
-  $("backend").textContent = (m.backend || "") + (m.muted ? " · stumm" : "");
+  $("backend").textContent = m.backend || "";
 }
 
 ["tightness", "aggression", "bluff"].forEach(key => {
@@ -147,6 +147,8 @@ function update(m) {
     bluff: Number($("bluff").value),
   }));
 });
+
+$("think").addEventListener("click", () => send({ type: "think" }));
 
 $("ask-form").addEventListener("submit", event => {
   event.preventDefault();
