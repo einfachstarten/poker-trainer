@@ -18,9 +18,10 @@ class FakeBackend:
     name = "fake"
 
     def __init__(self, answer, reading=READING):
-        self.answer, self.reading, self.prompts = answer, reading, []
+        self.answer, self.reading, self.prompts, self.quick = answer, reading, [], []
 
-    def read_table(self, img):
+    def read_table(self, img, quick=False):
+        self.quick.append(quick)
         return self.reading
 
     def new_hand(self):
@@ -74,7 +75,7 @@ class CompanionTest(unittest.TestCase):
 
     def make(self, answer, **cfg):
         self.backend, self.view, self.speaker = FakeBackend(answer), FakeView(), FakeSpeaker()
-        base = {"crop_region": {"x": 0, "y": 0, "w": 10, "h": 10}, "strategy": {}}
+        base = {"crop_region": {"x": 0, "y": 0, "w": 10, "h": 10}, "strategy": {}, "window_guard": False}
         base.update(cfg)
         return Companion(base, self.backend, self.view, self.speaker)
 
@@ -82,7 +83,7 @@ class CompanionTest(unittest.TestCase):
         with mock.patch("threading.Thread") as thread:  # run the advice inline
             thread.side_effect = lambda target, args=(), daemon=None: mock.Mock(
                 start=lambda: target(*args))
-            companion._on_frame(object(), "buttons")
+            companion._read_and_apply(object(), "buttons", time.time())
 
     def test_advice_is_shown_but_not_spoken_unasked(self):
         c = self.make("[[EMPFEHLUNG CALL 40]]\nCall, die Odds passen. Flush Draw mit Overcards.")
@@ -200,6 +201,50 @@ class CompanionTest(unittest.TestCase):
         c.set_listening("idle")
         c.think_aloud()
         self.assertEqual(self.speaker.said, ["Call."])
+
+    def test_big_line_explains_the_move_in_plain_words(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")
+        self.advise(c)
+        m = self.view.model
+        self.assertEqual(m["gloss"], "Mitgehen: 40 zahlen")
+        self.assertIn("Du bist dran. Mitgehen kostet 40.", m["events"])
+        self.assertTrue(m["events"][-1].startswith("Neue Hand. Du hast K♥ T♥."))
+
+    def test_waiting_shows_a_plan_for_the_next_move(self):
+        c = self.make("unbenutzt")
+        self.backend.reading = dict(READING, hero_to_act=False, to_call=0, buttons=[])
+        self.advise(c)
+        m = self.view.model
+        self.assertIsNone(m["action"])
+        self.assertEqual(m["wait_text"], "WARTEN")
+        self.assertIn("Setzt jemand", m["plan"])
+        self.assertEqual(self.backend.prompts, [])  # the plan is local math, no coach call
+
+    def test_turn_reads_are_quick_and_table_reads_are_full(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")
+        self.advise(c)
+        with mock.patch("threading.Thread"):
+            c._read_and_apply(object(), "table", time.time())
+        self.assertEqual(self.backend.quick, [True, False])
+
+    def test_an_older_frame_never_overwrites_a_newer_reading(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")
+        self.advise(c)
+        self.backend.reading = dict(READING, hero_cards=["2c", "3d"], board=[], hero_to_act=False)
+        with mock.patch("threading.Thread"):
+            c._read_and_apply(object(), "table", time.time() - 60)
+        self.assertEqual(self.view.model["hand"], ["Kh", "Th"])
+
+    def test_covered_table_is_not_read(self):
+        c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.", window_guard=True)
+        c._window_pid = lambda: 111
+        self.advise(c)                      # first valid reading: this window is the table
+        c._window_pid = lambda: 222         # another app now covers the region
+        reads = len(self.backend.quick)
+        c._dispatch(object(), "buttons")
+        time.sleep(0.2)
+        self.assertEqual(len(self.backend.quick), reads)
+        self.assertEqual(self.view.model["status"], "Tisch verdeckt, ich schaue nicht hin")
 
     def test_invalid_reading_is_not_advised(self):
         c = self.make("[[EMPFEHLUNG CALL 40]]\nCall.")

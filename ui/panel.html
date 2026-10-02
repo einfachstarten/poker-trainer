@@ -8,15 +8,25 @@
 <body>
 
 <header id="decision" class="wait">
-  <div>
-    <div id="action">Warte auf den Tisch</div>
-    <div id="decision-meta">
-      <span id="source"></span>
-      <span id="clamp-note"></span>
-    </div>
+  <div id="decision-main">
+    <div id="action">WARTEN</div>
+    <div id="gloss"></div>
   </div>
   <button id="think" type="button">Was denkst du?</button>
 </header>
+
+<section id="now">
+  <p id="why"></p>
+  <div id="decision-meta">
+    <span id="source"></span>
+    <span id="clamp-note"></span>
+  </div>
+</section>
+
+<section id="happened">
+  <h2>Was passiert ist</h2>
+  <ul id="events"><li class="empty">Noch nichts.</li></ul>
+</section>
 
 <section id="table">
   <div class="cards-row">
@@ -32,8 +42,8 @@
 
   <div id="equity-block">
     <div class="equity-head">
-      <span>Equity <strong id="equity">-</strong></span>
-      <span>nötig <strong id="required">-</strong></span>
+      <span>Gewinnchance <strong id="equity">-</strong></span>
+      <span>mindestens nötig <strong id="required">-</strong></span>
     </div>
     <div id="equity-bar"><div id="equity-fill"></div><div id="required-mark"></div></div>
     <div class="equity-foot" id="equity-basis">gegen Zufallshände</div>
@@ -45,11 +55,6 @@
     <div><dt>Position</dt><dd id="position">-</dd></div>
     <div><dt>Gegner</dt><dd id="opponents-n">-</dd></div>
   </dl>
-</section>
-
-<section>
-  <h2>Warum</h2>
-  <p id="why" class="empty">Noch keine Empfehlung.</p>
 </section>
 
 <section>

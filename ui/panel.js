@@ -45,16 +45,38 @@ function text(value) {
 function renderDecision(m) {
   const decision = $("decision");
   if (!m.action) {
+    // not the player's turn: say so, and show what to do when it comes
     decision.className = "wait";
-    $("action").textContent = m.headline || "Warte auf den Tisch";
+    $("action").textContent = m.wait_text || "WARTEN";
+    $("gloss").textContent = "";
+    $("why").textContent = m.plan || "";
     $("source").textContent = "";
     $("clamp-note").textContent = "";
     return;
   }
   decision.className = KINDS[m.action] || "wait";
   $("action").textContent = m.action + (m.amount ? " " + m.amount : "");
+  $("gloss").textContent = m.gloss || "";
+  $("why").textContent = m.why || "";
   $("source").textContent = m.source || "";
   $("clamp-note").textContent = m.clamp_note || "";
+}
+
+function renderEvents(lines) {
+  const box = $("events");
+  box.replaceChildren();
+  if (!lines || !lines.length) {
+    const empty = document.createElement("li");
+    empty.className = "empty";
+    empty.textContent = "Noch nichts.";
+    box.append(empty);
+    return;
+  }
+  lines.forEach(line => {
+    const item = document.createElement("li");
+    item.textContent = line;
+    box.append(item);
+  });
 }
 
 function renderEquity(m) {
@@ -128,9 +150,7 @@ function update(m) {
   $("to-call").textContent = text(m.to_call);
   $("position").textContent = text(m.position);
   $("opponents-n").textContent = text(m.opponents_n);
-  const why = $("why");
-  why.textContent = m.why || "Noch keine Empfehlung.";
-  why.className = m.why ? "" : "empty";
+  renderEvents(m.events);
   renderOpponents(m.opponents);
   renderTranscript(m.transcript);
   renderStrategy(m.strategy);

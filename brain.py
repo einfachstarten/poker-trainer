@@ -42,10 +42,30 @@ Regeln:
   last_action: fold, check, call, bet, raise, allin oder null.
 - Was nicht lesbar ist: null. Nicht raten."""
 
+# The turn reading skips the player list: fewer output tokens, so the answer arrives sooner.
+EYES_TURN_SYSTEM = """Du liest einen Texas-Hold'em-Tisch aus einem Screenshot aus. Du gibst keine Empfehlung.
+Antworte NUR mit einem JSON-Objekt, ohne Markdown, ohne Erklärung:
+{"hero_cards": ["5c","6s"], "board": ["7s","Qh","7c"], "pot": 10, "to_call": 0, "hero_stack": 2762,
+ "hero_to_act": true, "buttons": ["Fold","Check","Raise"], "hero_dealer": false, "facing_raise": false,
+ "opponents_in_hand": 3}
+Regeln:
+- Hero sitzt unten in der Mitte, dort wo die Aktionsbuttons erscheinen. hero_cards sind seine offenen Karten.
+- Karten als Rang (A K Q J T 9 8 7 6 5 4 3 2) plus Farbe (s h d c). Schau bei schräg liegenden Karten genau hin.
+- hero_to_act ist true genau dann, wenn Aktionsbuttons (Fold/Check/Call/Raise) sichtbar sind.
+- to_call ist der Betrag, den Hero zum Mitgehen zahlen muss (steht meist auf dem Call-Button), 0 wenn Check möglich ist.
+- pot ist der angezeigte Pot. hero_dealer ist true, wenn der Dealer-Button (D) an Heros Platz liegt.
+- facing_raise: preflop true, wenn vor Hero jemand erhöht hat. Sonst false. Wenn unklar: null.
+- opponents_in_hand: Zahl der Gegner, die noch Karten halten.
+- Zeigt das Bild keinen Pokertisch: {"hero_cards": null, "board": null, "hero_to_act": false}
+- Was nicht lesbar ist: null. Nicht raten."""
+
 VOICE_SYSTEM = """Du bist Poker-Companion und Coach: ruhig, klar, mit trockenem Humor in kleiner Dosis. \
 Du sitzt neben dem Spieler (Texas Hold'em) und siehst über die App mit.
 
-Sprache: Deutsch, du-Form. Poker-Begriffe bleiben englisch (Call, Raise, Fold, Check, Flop, Pot Odds). \
+Der Spieler ist Anfänger. Sag zuerst klar, was er tun soll, und begründe es in einfachen Worten: \
+"Gewinnchance" statt Equity, "der Preis lohnt sich" statt Pot Odds. Fachbegriffe nur, wenn er danach fragt.
+
+Sprache: Deutsch, du-Form. Die Aktionen heißen wie auf den Buttons (Call, Raise, Fold, Check). \
 Deine Antwort wird vorgelesen: höchstens zwei kurze Sätze, keine Listen, kein Markdown, keine Kartensymbole. \
 Nur wenn der Spieler ausdrücklich mehr wissen will, darfst du länger werden.
 
@@ -213,21 +233,29 @@ class CliBackend:
     def __init__(self, binary: str, cfg: dict):
         self._width = int(cfg.get("watch_width", 1200))
         self._eyes = CliSession(binary, cfg.get("watch_model", "haiku"), EYES_SYSTEM, thinking=False)
+        self._eyes_turn = CliSession(binary, cfg.get("watch_model", "haiku"), EYES_TURN_SYSTEM, thinking=False)
         self._voice = CliSession(binary, cfg.get("brain_model", "sonnet"), VOICE_SYSTEM, effort="low")
         self._seed = ""
         # warm both processes so the first read does not pay the start-up
         threading.Thread(target=self._eyes.start, daemon=True).start()
+        threading.Thread(target=self._eyes_turn.start, daemon=True).start()
         threading.Thread(target=self._voice.start, daemon=True).start()
         L.info(f"CLI-Backend: eyes={cfg.get('watch_model', 'haiku')}, voice={cfg.get('brain_model', 'sonnet')}")
 
-    def read_table(self, img: Image.Image) -> dict | None:
-        answer = self._eyes.ask("Lies den Tisch.", encode_image(img, self._width))
-        return extract_json(answer)
+    def read_table(self, img: Image.Image, quick: bool = False) -> dict | None:
+        """quick: the short reading for the player's turn, on its own session so it never queues."""
+        session = self._eyes_turn if quick else self._eyes
+        answer = session.ask("Lies den Tisch.", encode_image(img, self._width))
+        reading = extract_json(answer)
+        if reading is None:
+            L.warning(f"Lesung ohne JSON: {answer[:200]!r}")
+        return reading
 
     def new_hand(self):
         """Old screenshots of a finished hand are dead weight: start the eyes with a fresh context."""
-        if self._eyes.turns:
-            threading.Thread(target=self._eyes.restart, daemon=True).start()
+        for session in (self._eyes, self._eyes_turn):
+            if session.turns:
+                threading.Thread(target=session.restart, daemon=True).start()
 
     def ask(self, text: str, img: Image.Image | None = None, on_delta=None, cancelled=None) -> str:
         if self._seed:
@@ -246,6 +274,7 @@ class CliBackend:
 
     def close(self):
         self._eyes.close()
+        self._eyes_turn.close()
         self._voice.close()
 
 
@@ -262,4 +291,5 @@ def make_backend(cfg: dict, api_key: str = ""):
     if not api_key:
         raise BrainError("Weder claude (eingeloggt) noch ein API-Key vorhanden")
     import analyzer
-    return analyzer.ApiBackend(api_key, cfg.get("model", "claude-sonnet-4-6"), EYES_SYSTEM, VOICE_SYSTEM)
+    return analyzer.ApiBackend(api_key, cfg.get("model", "claude-sonnet-4-6"),
+                               EYES_SYSTEM, VOICE_SYSTEM, EYES_TURN_SYSTEM)

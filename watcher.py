@@ -20,10 +20,11 @@ L = log.get("watcher")
 
 
 class Watcher:
-    def __init__(self, get_region, on_frame, interval: float = 0.5, settle: float = 0.7,
-                 max_wait: float = 3.0, turn_gap: float = 1.5, table_gap: float = 6.0,
+    def __init__(self, get_region, on_frame, interval: float = 0.3, settle: float = 0.4,
+                 max_wait: float = 2.0, turn_gap: float = 1.0, table_gap: float = 6.0,
                  threshold: float = 0.003, buttons_zone: float = 0.18):
-        """on_frame(img, reason) runs in the watcher thread; reason is 'buttons', 'table' or 'forced'."""
+        """on_frame(img, reason) runs in the watcher thread and should return quickly;
+        reason is 'buttons', 'table' or 'forced'."""
         self._get_region = get_region
         self._on_frame = on_frame
         self._interval = interval

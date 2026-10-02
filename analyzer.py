@@ -32,11 +32,13 @@ class ApiBackend:
 
     name = "API"
 
-    def __init__(self, api_key: str, model: str, eyes_system: str, voice_system: str):
+    def __init__(self, api_key: str, model: str, eyes_system: str, voice_system: str,
+                 eyes_turn_system: str | None = None):
         import anthropic
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model
         self._eyes_system = eyes_system
+        self._eyes_turn_system = eyes_turn_system or eyes_system
         self._voice_system = voice_system
         self._history: list[dict] = []
         self._seed = ""
@@ -48,10 +50,11 @@ class ApiBackend:
         return {"type": "image", "source": {
             "type": "base64", "media_type": "image/jpeg", "data": optimize_image(img)}}
 
-    def read_table(self, img: Image.Image) -> dict | None:
+    def read_table(self, img: Image.Image, quick: bool = False) -> dict | None:
         import brain
         response = self.client.messages.create(
-            model=self.model, max_tokens=1500, system=self._eyes_system,
+            model=self.model, max_tokens=1500,
+            system=self._eyes_turn_system if quick else self._eyes_system,
             messages=[{"role": "user", "content": [
                 self._image_block(img), {"type": "text", "text": "Lies den Tisch."}]}],
         )

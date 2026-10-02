@@ -265,7 +265,7 @@ class Overlay:
         """Compact layout: show the companion's view model with the three labels."""
         action = model.get("action")
         if not action:
-            self.update_status(model.get("headline") or model.get("status") or "")
+            self.update_status(model.get("wait_text") or model.get("status") or "")
             return
         color = {"FOLD": "#FF4444", "CHECK": "#FFAA00", "CALL": "#FFAA00"}.get(action, "#00CC00")
 

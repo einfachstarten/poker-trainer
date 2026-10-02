@@ -68,6 +68,10 @@ def _money(value: float) -> float:
     return float(round(value)) if value >= 10 else round(value, 2)
 
 
+def fmt(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:.2f}"
+
+
 def _pct(value: float) -> str:
     return f"{round(value * 100)} %"
 
@@ -292,6 +296,37 @@ class StrategyProfile:
                 return capped("All-in zu riskant für diese Strategie")
             return Recommendation("RAISE", _money(amount))
         return capped("Empfehlung nicht lesbar")
+
+    # --- looking ahead while the others act ---
+
+    def plan(self, sit: Situation) -> str:
+        """What to do when the turn comes, in plain words. Empty without readable cards."""
+        if sit.street == "preflop":
+            pct = eq.preflop_percentile(sit.hand_class)
+            if pct is None:
+                return ""
+            th = self.thresholds(sit.opponents, sit.position)
+            if pct <= th["three_bet_range"]:
+                return "Starke Hand. Erhöhen, auch wenn schon jemand erhöht hat."
+            if pct <= th["raise_range"]:
+                return "Gute Hand. Erhöhen, wenn vor dir niemand erhöht hat, sonst mitgehen."
+            if pct <= th["open_range"]:
+                return "Spielbare Hand. Mitgehen, solange es billig bleibt. Erhöht jemand: aussteigen."
+            return "Schwache Hand. Check, wenn es gratis ist. Setzt jemand: aussteigen."
+        if sit.equity is None:
+            return ""
+        th = self.thresholds(sit.opponents, sit.position)
+        if sit.equity >= th["value_bet"] and sit.pot:
+            free = f"Bet {fmt(_money(sit.pot * th['bet_fraction']))}"
+        else:
+            free = "Check"
+        share = sit.equity - th["call_margin"]
+        limit = sit.pot * share / (1 - share) if sit.pot and 0 < share < 1 else 0
+        if limit >= sit.pot * 0.1:  # a price below a tenth of the pot is no real call
+            priced = f"Setzt jemand: mitgehen bis etwa {fmt(_money(limit))}, darüber aussteigen."
+        else:
+            priced = "Setzt jemand: aussteigen."
+        return f"Wenn niemand setzt: {free}. {priced}"
 
     # --- text for the LLM ---
 

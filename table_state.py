@@ -10,6 +10,10 @@ import cards
 STREETS = {0: "preflop", 3: "flop", 4: "turn", 5: "river"}
 STREET_NAMES = {"preflop": "Preflop", "flop": "Flop", "turn": "Turn", "river": "River"}
 ACTION_KINDS = ("fold", "check", "call", "bet", "raise", "allin")
+ACTION_WORDS = {"fold": "steigt aus", "check": "checkt", "call": "geht mit", "bet": "setzt",
+                "raise": "erhöht", "allin": "geht All-in"}
+HERO_WORDS = {"FOLD": "Du steigst aus.", "CHECK": "Du checkst.", "CALL": "Du gehst mit.",
+              "RAISE": "Du erhöhst."}
 MIN_ACTIONS_FOR_LABEL = 8
 
 
@@ -59,6 +63,7 @@ class TableState:
     hero_position: str | None = None
     big_blind: float | None = None
     facing_raise: bool | None = None
+    opponents_hint: int | None = None  # quick readings count the opponents instead of listing them
     valid: bool = True
 
     @classmethod
@@ -94,11 +99,15 @@ class TableState:
             buttons=[str(b) for b in data.get("buttons") or []], players=players,
             hero_position=position,
             big_blind=_num(data.get("big_blind")),
-            facing_raise=facing if isinstance(facing, bool) else None, valid=valid,
+            facing_raise=facing if isinstance(facing, bool) else None,
+            opponents_hint=int(hint) if (hint := _num(data.get("opponents_in_hand"))) else None,
+            valid=valid,
         )
 
     @property
     def opponents(self) -> int:
+        if not self.players and self.opponents_hint:
+            return max(1, self.opponents_hint)
         return max(1, sum(1 for p in self.players if p.in_hand))
 
     @property
@@ -129,7 +138,9 @@ class HandTracker:
         self.hand_no = 0
         self.opponents: dict[str, dict] = {}
         self.timeline: list[dict] = []
+        self.players: list[Player] = []  # last full reading of the table
         self.state: TableState | None = None
+        self._news: list[str] = []
         self._cards: list[str] | None = None
         self._board: list[str] = []
         self._street: str | None = None
@@ -159,6 +170,7 @@ class HandTracker:
             self._hand_players.clear()
             self.timeline = []
             events.append("new_hand")
+            self._news.append(f"Neue Hand. Du hast {cards.pretty_list(state.hero_cards)}.")
         elif len(state.hero_cards) == 2:
             self._cards = list(state.hero_cards)  # corrected misread within the same hand
         else:
@@ -167,6 +179,9 @@ class HandTracker:
         if self.hand_no and state.street != self._street:
             if self._street is not None:
                 events.append("street")
+                if state.board:
+                    fresh = state.board[len(self._board):] if state.street != "flop" else state.board
+                    self._news.append(f"{STREET_NAMES[state.street]}: {cards.pretty_list(fresh)}")
             self._street = state.street
         self._board = list(state.board)
 
@@ -176,6 +191,8 @@ class HandTracker:
             self._last_turn_key = state.key()
             self._pending_turn = state
             events.append("hero_turn")
+            price = f"Mitgehen kostet {fmt_amount(state.to_call)}." if state.to_call else "Check ist gratis."
+            self._news.append(f"Du bist dran. {price}")
 
         entry = {"street": state.street, "pot": state.pot, "to_call": state.to_call,
                  "actions": {p.name: p.last_action for p in state.players if p.last_action}}
@@ -195,6 +212,8 @@ class HandTracker:
         return not continues
 
     def _count_opponents(self, state: TableState):
+        if state.players:
+            self.players = state.players
         for p in state.players:
             stats = self.opponents.setdefault(p.name, {"hands": 0, **{k: 0 for k in ACTION_KINDS}})
             if p.name not in self._hand_players:
@@ -205,6 +224,7 @@ class HandTracker:
                 if key not in self._seen_actions:
                     self._seen_actions.add(key)
                     stats[p.last_action] += 1
+                    self._news.append(f"{p.name} {ACTION_WORDS[p.last_action]}.")
 
     def _resolve_hero_action(self, state: TableState, hand_ended: bool):
         """Infer what the hero did after the last advised turn from the stack change."""
@@ -231,6 +251,13 @@ class HandTracker:
         if action or hand_ended:
             self._hero_action = action
             self._pending_turn = None
+            if action:
+                self._news.append(HERO_WORDS[action])
+
+    def pop_news(self) -> list[str]:
+        """What happened since the last call, in plain words, oldest first."""
+        news, self._news = self._news, []
+        return news
 
     def pop_hero_action(self) -> str | None:
         action, self._hero_action = self._hero_action, None
@@ -247,10 +274,8 @@ class HandTracker:
 
     def opponents_view(self) -> list[dict]:
         """Opponents at the table right now, for the panel and the LLM."""
-        if not self.state:
-            return []
         view = []
-        for p in self.state.players:
+        for p in self.players:
             stats = self.opponents.get(p.name, {})
             counts = ", ".join(f"{stats[k]}x {k}" for k in ACTION_KINDS if stats.get(k))
             view.append({"name": p.name, "label": self.opponent_label(p.name),

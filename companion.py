@@ -42,12 +42,21 @@ class Companion:
         self.auto_speak = bool(cfg.get("auto_speak", False))
         self.tracker = HandTracker()
         self.watcher = Watcher(
-            lambda: self.cfg["crop_region"], self._on_frame,
-            interval=cfg.get("capture_interval", 0.5),
+            lambda: self.cfg["crop_region"], self._dispatch,
+            interval=cfg.get("watch_interval", 0.3),
             threshold=cfg.get("watch_threshold", 0.003),
             buttons_zone=cfg.get("buttons_zone", 0.18),
         )
         self._lock = threading.Lock()
+        self._apply_lock = threading.Lock()
+        self._applied_at = 0.0  # capture time of the newest reading that was applied
+        # Two lanes: the player's turn gets its own reader, so it never waits behind a table reading.
+        self._pending = {"turn": None, "table": None}
+        self._wake = {"turn": threading.Event(), "table": threading.Event()}
+        self._running = False
+        self._table_pid = None
+        self._window_pid = _window_pid_under(self.cfg) if cfg.get("window_guard", True) else (lambda: None)
+        self._events: list[str] = []
         self._advice_gen = 0
         self._speak_gen = None  # the decision the player asked to hear
         self._advice_lines: list[str] = []  # what the coach would say about the open decision
@@ -64,11 +73,17 @@ class Companion:
     # --- lifecycle and controls ---
 
     def start(self):
-        self._update(status="Schaue auf den Tisch", headline="Warte auf den Tisch")
+        self._update(status="Schaue auf den Tisch", wait_text="WARTEN", plan="Ich suche den Tisch.")
+        self._running = True
+        for lane in self._pending:
+            threading.Thread(target=self._reader_loop, args=(lane,), daemon=True).start()
         self.watcher.start()
 
     def stop(self):
         self.watcher.stop()
+        self._running = False
+        for wake in self._wake.values():
+            wake.set()
         self._advice_gen += 1
         self.speaker.stop()
         self.backend.close()
@@ -138,11 +153,34 @@ class Companion:
 
     # --- watching ---
 
-    def _on_frame(self, img, reason: str):
+    def _dispatch(self, img, reason: str):
+        """Called by the watcher for every frame worth reading. Hands it to a lane and returns."""
+        if reason == "forced":
+            self._table_pid = None  # F1 means "look here": whatever is under the region now is the table
+        if self._table_pid is not None and self._window_pid() != self._table_pid:
+            # another app covers the region: nothing of it is sent anywhere
+            self._update(status="Tisch verdeckt, ich schaue nicht hin")
+            return
+        lane = "table" if reason == "table" else "turn"
+        self._pending[lane] = (img, reason, time.time())
+        self._wake[lane].set()
+
+    def _reader_loop(self, lane: str):
+        while self._running:
+            self._wake[lane].wait()
+            self._wake[lane].clear()
+            job, self._pending[lane] = self._pending[lane], None
+            if job and self._running:
+                try:
+                    self._read_and_apply(*job)
+                except Exception as e:
+                    L.error(f"Lesung ({lane}) fehlgeschlagen: {e}")
+
+    def _read_and_apply(self, img, reason: str, captured_at: float):
         self._update(status="Lese Tisch")
         t0 = time.time()
         try:
-            reading = self.backend.read_table(img)
+            reading = self.backend.read_table(img, quick=reason != "table")
         except Exception as e:
             L.error(f"Tisch-Lesung fehlgeschlagen: {e}")
             self._update(status="Claude nicht erreichbar")
@@ -157,9 +195,21 @@ class Companion:
                 self.watcher.force()
             return
         self._retried = False
+        with self._apply_lock:
+            if captured_at < self._applied_at:
+                return  # the other lane already delivered a newer picture
+            self._applied_at = captured_at
+            self._apply(state, img)
+
+    def _apply(self, state: TableState, img):
         self._last_img = img
+        if self._table_pid is None and state.hero_cards:
+            self._table_pid = self._window_pid()  # this is the window to keep watching
 
         events = self.tracker.update(state)
+        news = self.tracker.pop_news()
+        if news:
+            self._events = (list(reversed(news)) + self._events)[:8]
         hero_action = self.tracker.pop_hero_action()
         if hero_action and self._last_decision:
             history.log_hero_action(self._last_decision, hero_action)
@@ -174,9 +224,12 @@ class Companion:
         elif not state.actionable:
             self._advice_gen += 1  # whatever was being said about the old decision is stale
             self._advice_lines = []
-            headline = "Gegner sind dran" if state.hero_cards else "Warte auf die nächste Hand"
-            self._update(action=None, amount=None, clamp_note="", source="", headline=headline,
+            plan = self.profile.plan(self._situation(state, eq)) if state.hero_cards else ""
+            self._update(action=None, amount=None, gloss="", clamp_note="", source="",
+                         wait_text="WARTEN", plan=plan or "Die nächste Hand kommt gleich.",
                          status="Schaue auf den Tisch")
+        else:
+            self._update(status="Du bist dran")
 
     def _on_new_hand(self):
         self._advice_gen += 1
@@ -188,8 +241,7 @@ class Companion:
             notes = "; ".join(f"{o['name']}: {o['label']} ({o['counts']})"
                               for o in self.tracker.opponents_view() if o["counts"])
             self.backend.reset_conversation(f"Gegner bisher: {notes}" if notes else "")
-        self._update(action=None, amount=None, clamp_note="", source="", why="",
-                     headline="Neue Hand")
+        self._update(action=None, amount=None, gloss="", clamp_note="", source="", why="")
 
     def _equity(self, state: TableState) -> float | None:
         if len(state.hero_cards) != 2:
@@ -213,10 +265,12 @@ class Companion:
     def _show_baseline(self, state: TableState, sit: Situation) -> Recommendation:
         base = self.profile.baseline(sit)
         if base.action == "?":
-            self._update(action=None, headline="Karten nicht erkannt", why=base.note, status="Du bist dran")
+            self._update(action=None, wait_text="DU BIST DRAN", plan="Ich erkenne deine Karten nicht. F1 liest neu.",
+                         why=base.note, status="Du bist dran")
         else:
-            self._update(action=base.action, amount=_amount(base), source="Basis: Mathe und Strategie",
-                         clamp_note="", why=base.note, headline="", status="Du bist dran")
+            self._update(action=base.action, amount=_amount(base), gloss=_gloss(base),
+                         source="Basis: Mathe und Strategie", clamp_note="", why=base.note,
+                         status="Du bist dran")
         return base
 
     def _advise(self, state: TableState, eq: float | None):
@@ -243,7 +297,8 @@ class Companion:
                     rec = parse_markers([text]).get("recommendation")
                     if rec and base.action != "?":
                         final = self.profile.clamp(Recommendation(*rec), sit)
-                        self._update(action=final.action, amount=_amount(final), source="Coach",
+                        self._update(action=final.action, amount=_amount(final), gloss=_gloss(final),
+                                     source="Coach",
                                      clamp_note="begrenzt durch Strategie" if final.clamped else "")
                         if final.clamped:
                             voice(_spoken(final))
@@ -357,7 +412,7 @@ class Companion:
         with self._lock:
             self._model.update(changes)
             self._model.update(
-                transcript=self._transcript,
+                transcript=self._transcript, events=self._events,
                 strategy={"name": self.profile.name, **self.profile.to_dict()},
             )
             model = dict(self._model)
@@ -375,6 +430,32 @@ class Companion:
         img.save(stem + ".jpg", quality=85)
         with open(stem + ".json", "w", encoding="utf-8") as f:
             json.dump(reading, f, ensure_ascii=False)
+
+
+def _window_pid_under(cfg: dict):
+    """A function that tells which app's window lies under the middle of the capture region."""
+    def lookup():
+        import layout
+        region = cfg["crop_region"]
+        found = layout.window_at(region["x"] + region["w"] / 2, region["y"] + region["h"] / 2)
+        return found[0] if found else None
+    return lookup
+
+
+def _gloss(rec: Recommendation) -> str:
+    """The move in plain words, for players who do not live in poker terms."""
+    amount = _amount(rec)
+    if rec.action == "FOLD":
+        return "Aussteigen"
+    if rec.action == "CHECK":
+        return "Schieben, kostet nichts"
+    if rec.action == "CALL":
+        return f"Mitgehen: {amount} zahlen" if amount else "Mitgehen"
+    if rec.action == "RAISE":
+        return f"Erhöhen auf {amount}" if amount else "Erhöhen"
+    if rec.action == "ALL-IN":
+        return "Alles setzen"
+    return ""
 
 
 def _amount(rec: Recommendation) -> str:

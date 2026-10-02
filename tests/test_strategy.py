@@ -122,6 +122,29 @@ class ClampTest(unittest.TestCase):
         self.assertTrue(self.p.clamp(Recommendation("RAISE", 50), s).clamped)
         self.assertFalse(StrategyProfile(aggression=5).clamp(Recommendation("RAISE", 50), s).clamped)
 
+    def test_plan_for_a_strong_hand_while_waiting(self):
+        text = self.p.plan(sit(equity=0.85, pot=100, to_call=0))
+        self.assertIn("Bet 60", text)
+        self.assertIn("mitgehen", text)
+
+    def test_plan_for_a_weak_hand_while_waiting(self):
+        text = self.p.plan(sit(equity=0.10, pot=100, to_call=0))
+        self.assertIn("Check", text)
+        self.assertIn("aussteigen", text)
+        self.assertNotIn("mitgehen bis", text)
+
+    def test_plan_names_the_price_worth_paying(self):
+        # 40 % equity minus 6 points reserve = 34 % → up to pot * 0.34 / 0.66
+        text = self.p.plan(sit(equity=0.40, pot=100, to_call=0))
+        self.assertIn("mitgehen bis etwa 52", text)
+
+    def test_plan_preflop(self):
+        self.assertIn("Erhöhen", self.p.plan(sit(street="preflop", hand_class="AA", equity=0.85)))
+        self.assertIn("aussteigen", self.p.plan(sit(street="preflop", hand_class="72o", equity=0.3)).lower())
+
+    def test_plan_without_cards_is_empty(self):
+        self.assertEqual(self.p.plan(sit(equity=None, hand_class=None)), "")
+
     def test_describe_mentions_numbers(self):
         text = self.p.describe(sit(equity=0.4, pot=160, to_call=40))
         self.assertIn("Moderat aggressiv", text)
