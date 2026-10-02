@@ -89,7 +89,7 @@ function renderOpponents(list) {
     name.textContent = o.name;
     const detail = document.createElement("span");
     detail.className = "detail";
-    detail.textContent = o.label + (o.counts ? ", " + o.counts : "") + (o.hands ? " (" + o.hands + " Hände)" : "");
+    detail.textContent = o.label + (o.counts ? ", " + o.counts : "") + (o.hands ? " (" + o.hands + (o.hands === 1 ? " Hand)" : " Hände)") : "");
     row.append(name, detail);
     box.append(row);
   });
@@ -113,6 +113,7 @@ function renderStrategy(s) {
   $("strategy-name").textContent = s.name || "";
   ["tightness", "aggression", "bluff"].forEach(key => {
     if (document.activeElement !== $(key)) $(key).value = s[key];
+    $(key + "-value").textContent = $(key).value;
   });
 }
 
@@ -138,6 +139,7 @@ function update(m) {
 }
 
 ["tightness", "aggression", "bluff"].forEach(key => {
+  $(key).addEventListener("input", () => { $(key + "-value").textContent = $(key).value; });
   $(key).addEventListener("change", () => send({
     type: "strategy",
     tightness: Number($("tightness").value),

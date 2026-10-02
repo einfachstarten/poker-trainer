@@ -1,4 +1,4 @@
-"""Poker Trainer MVP — main entry point with menubar + hotkey trigger."""
+"""Poker Companion — main entry point: menubar, hotkeys, wiring of the companion."""
 
 from __future__ import annotations
 
@@ -12,6 +12,9 @@ import tarfile
 import threading
 import time
 import urllib.request
+
+import bootstrap
+bootstrap.ensure_requirements()
 
 VERSION = "1.4.1"
 REPO = "einfachstarten/poker-trainer"
@@ -41,20 +44,24 @@ log.setup()
 L = log.get("main")
 
 import config
-import capture
-import analyzer
+import brain
+import companion
+import layout
 import overlay
+import panel
 import selector
 import history
 import region_indicator
+import voice_out
+from strategy import StrategyProfile
 
 # F1 = 122, F2 = 120, F3 = 99
 HOTKEY_CODE = 122
 HOTKEY_NAME = "F1"
 NEWROUND_CODE = 120
 NEWROUND_NAME = "F2"
-DETAIL_CODE = 99
-DETAIL_NAME = "F3"
+MUTE_CODE = 99
+MUTE_NAME = "F3"
 
 
 class PokerTrainerApp(rumps.App):
@@ -63,20 +70,18 @@ class PokerTrainerApp(rumps.App):
         self.cfg = config.load()
         L.info(f"Config geladen: region={self.cfg.get('crop_region')}")
         self.running = False
-        self.overlay_win: overlay.Overlay | None = None
-        self.analyzer_inst: analyzer.Analyzer | None = None
+        self.view = None  # panel.Panel or overlay.Overlay, whichever layout is active
+        self.companion: companion.Companion | None = None
+        self._hotkey_thread = None
         self.region_indicator = region_indicator.RegionIndicator(
             on_region_change=self._on_indicator_region_change,
         )
         self._region_editing = False
-        self._analyzing = False
-        self._detailing = False
         self._capture_hint_shown = False
         self._latest_tag = None
 
-        self._current_style = self.cfg.get("play_style", analyzer.DEFAULT_STYLE)
-        current_name = analyzer.PLAY_STYLES.get(self._current_style, {}).get("name", "TAG")
-        self._style_button = rumps.MenuItem(f"Stil: {current_name}", callback=self._cycle_style)
+        profile = StrategyProfile.from_dict(self.cfg.get("strategy"))
+        self._strategy_button = rumps.MenuItem(f"Strategie: {profile.name}", callback=self._cycle_strategy)
 
         self._update_button = rumps.MenuItem(f"Version {VERSION}", callback=None)
         self._update_button.set_callback(None)
@@ -86,9 +91,10 @@ class PokerTrainerApp(rumps.App):
 
         self.menu = [
             rumps.MenuItem("Start", callback=self.toggle),
+            rumps.MenuItem("Split anordnen", callback=self.arrange_split),
             rumps.MenuItem("Neue Region", callback=self.new_region),
             self._edit_region_button,
-            self._style_button,
+            self._strategy_button,
             rumps.MenuItem("Stats", callback=self.show_stats),
             None,
             self._update_button,
@@ -139,19 +145,39 @@ class PokerTrainerApp(rumps.App):
         config.save(self.cfg)
         L.info(f"Region durch Indicator-Drag aktualisiert: {region}")
 
-    def _cycle_style(self, sender):
-        keys = list(analyzer.PLAY_STYLES.keys())
-        idx = keys.index(self._current_style) if self._current_style in keys else 0
-        new_key = keys[(idx + 1) % len(keys)]
+    def _cycle_strategy(self, _):
+        """Step through the presets. Fine tuning happens with the dials in the panel."""
+        if self.companion:
+            self.companion.cycle_preset()
+            return
+        names = list(companion.PRESETS)
+        current = StrategyProfile.from_dict(self.cfg.get("strategy")).name
+        nxt = names[(names.index(current) + 1) % len(names)] if current in names else names[0]
+        self.cfg["strategy"] = StrategyProfile.from_preset(nxt).to_dict()
+        self._save_cfg(self.cfg)
 
-        self._current_style = new_key
-        self.cfg["play_style"] = new_key
-        config.save(self.cfg)
-        if self.analyzer_inst:
-            self.analyzer_inst.set_style(new_key)
+    def _save_cfg(self, cfg: dict):
+        """Persist settings and keep the menu in step (the companion calls this from its threads)."""
+        config.save(cfg)
+        name = StrategyProfile.from_dict(cfg.get("strategy")).name
+        AppHelper.callAfter(setattr, self._strategy_button, "title", f"Strategie: {name}")
 
-        sender.title = f"Stil: {analyzer.PLAY_STYLES[new_key]['name']}"
-        L.info(f"Spielstil: {analyzer.PLAY_STYLES[new_key]['name']}")
+    def arrange_split(self, _):
+        """Dock the panel on the right and move the table window to the left of it."""
+        if not self.running or not isinstance(self.view, panel.Panel):
+            rumps.alert("Split anordnen", "Erst auf 'Start' klicken (Layout: Split).")
+            return
+        result = layout.arrange(self.cfg["crop_region"])
+        self.view.set_frame(result["panel"])
+        if result["region"]:
+            self.cfg["crop_region"] = result["region"]
+            config.save(self.cfg)
+            self.region_indicator.show(result["region"])
+            L.info(f"Split angeordnet, Region jetzt {result['region']}")
+        else:
+            rumps.alert("Split anordnen",
+                        "Das Tischfenster ließ sich nicht verschieben. Das Panel sitzt rechts, "
+                        "bitte das Tischfenster von Hand daneben legen und 'Region anpassen' nutzen.")
 
     def show_stats(self, _):
         stats = history.get_session_stats()
@@ -159,17 +185,8 @@ class PokerTrainerApp(rumps.App):
         rumps.alert("Poker Trainer Stats", stats)
 
     def start_monitoring(self):
-        if self.overlay_win:
-            L.warning("Overlay existiert bereits, überspringe")
-            return
-
-        api_key = config.get_api_key(self.cfg)
-        if not api_key:
-            L.error("Kein API Key!")
-            rumps.alert(
-                "API Key fehlt",
-                "Setze ANTHROPIC_API_KEY oder trage ihn in ~/.poker-trainer/config.json ein"
-            )
+        if self.companion:
+            L.warning("Companion läuft bereits, überspringe")
             return
 
         # Without this permission every capture only shows the desktop. Hint
@@ -199,32 +216,47 @@ class PokerTrainerApp(rumps.App):
 
         L.info(f"Starte Monitoring mit Region {self.cfg['crop_region']}")
 
-        self.analyzer_inst = analyzer.Analyzer(
-            api_key=api_key,
-            model=self.cfg.get("model", "claude-sonnet-4-6"),
-            style=self.cfg.get("play_style", analyzer.DEFAULT_STYLE),
-        )
+        try:
+            backend = brain.make_backend(self.cfg, config.get_api_key(self.cfg))
+        except brain.BrainError as e:
+            L.error(f"Kein Claude-Zugang: {e}")
+            rumps.alert(
+                "Claude nicht erreichbar",
+                f"{e}\n\nEntweder 'claude auth login' im Terminal ausführen oder einen "
+                "API Key in ~/.poker-trainer/config.json eintragen."
+            )
+            return
 
-        self.overlay_win = overlay.Overlay(
-            position=self.cfg.get("overlay_position"),
-            size=self.cfg.get("overlay_size"),
-            on_button=self._on_overlay_button,
-        )
-        self.overlay_win.start()
+        if self.cfg.get("layout") == "overlay":
+            self.view = overlay.Overlay(
+                position=self.cfg.get("overlay_position"),
+                size=self.cfg.get("overlay_size"),
+                on_button=self._on_overlay_button,
+            )
+        else:
+            self.view = panel.Panel(
+                frame=self.cfg.get("panel_frame"),
+                on_message=lambda message: self.companion and self.companion.on_view_message(message),
+            )
+        self.view.start()
         self.region_indicator.show(self.cfg["crop_region"])
-        L.info("Overlay gestartet")
 
+        self.companion = companion.Companion(
+            self.cfg, backend, self.view,
+            voice_out.Speaker(voice=self.cfg.get("voice")), save_cfg=self._save_cfg,
+        )
+        self.companion.start()
         self.running = True
-        self._analyzing = False
-        self._detailing = False
+        L.info(f"Companion gestartet ({backend.name})")
 
         if not CGPreflightListenEventAccess():
             # macOS asks once to allow the hotkeys ("Eingabeüberwachung")
             CGRequestListenEventAccess()
 
-        self._hotkey_thread = threading.Thread(target=self._listen_hotkey, daemon=True)
-        self._hotkey_thread.start()
-        L.info(f"Hotkeys: {HOTKEY_NAME}=Analyse, {NEWROUND_NAME}=Neue Runde, {DETAIL_NAME}=Detail")
+        if self._hotkey_thread is None:  # one event tap for the app's lifetime
+            self._hotkey_thread = threading.Thread(target=self._listen_hotkey, daemon=True)
+            self._hotkey_thread.start()
+        L.info(f"Hotkeys: {HOTKEY_NAME}=Neu lesen, {NEWROUND_NAME}=Neue Hand, {MUTE_NAME}=Stumm")
 
     def stop_monitoring(self):
         L.info("Stoppe Monitoring")
@@ -232,13 +264,20 @@ class PokerTrainerApp(rumps.App):
 
         self.region_indicator.hide()
 
-        if self.overlay_win:
-            self.cfg["overlay_position"] = self.overlay_win.get_position()
-            self.cfg["overlay_size"] = self.overlay_win.get_size()
+        if self.companion:
+            self.companion.stop()
+            self.companion = None
+
+        if self.view:
+            if isinstance(self.view, panel.Panel):
+                self.cfg["panel_frame"] = self.view.get_frame()
+            else:
+                self.cfg["overlay_position"] = self.view.get_position()
+                self.cfg["overlay_size"] = self.view.get_size()
             config.save(self.cfg)
-            self.overlay_win.stop()
-            self.overlay_win = None
-            L.info("Overlay gestoppt, Position gespeichert")
+            self.view.stop()
+            self.view = None
+            L.info("Fenster geschlossen, Position gespeichert")
 
     def _check_for_update(self):
         """Check GitHub releases API for newer version."""
@@ -314,41 +353,32 @@ class PokerTrainerApp(rumps.App):
             os.execv(BUNDLE_EXE, [BUNDLE_EXE])
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
-    def _speak(self, text):
-        """Speak text using macOS say in background."""
-        clean = text.replace("♠", " spades").replace("♦", " diamonds")
-        clean = clean.replace("♥", " hearts").replace("♣", " clubs")
-        clean = clean.replace("→", "").replace("—", ",")
-        subprocess.Popen(["say", "-v", "Daniel", clean])
-
     def _on_overlay_button(self, tag):
-        """Handle overlay button clicks: 1=quick, 2=newround, 3=detail."""
-        if not self.running:
+        """Handle overlay button clicks: 1=read now, 2=new hand, 3=mute."""
+        if not self.companion:
             return
-        if tag == 1 and not self._analyzing:
-            L.info("Button: Quick-Analyse")
-            threading.Thread(target=self._do_analysis, daemon=True).start()
+        if tag == 1:
+            self.companion.force_read()
         elif tag == 2:
-            L.info("Button: Neue Runde")
-            self._new_round()
-        elif tag == 3 and not self._detailing:
-            L.info("Button: Detail")
-            threading.Thread(target=self._do_detail, daemon=True).start()
+            self.companion.new_hand()
+        elif tag == 3:
+            self.companion.toggle_mute()
 
     def _listen_hotkey(self):
         """Listen for global hotkey events via Quartz Event Tap."""
 
         def callback(proxy, event_type, event, refcon):
             keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
-            if keycode == HOTKEY_CODE and self.running and not self._analyzing:
-                L.info(f"{HOTKEY_NAME} gedrückt!")
-                threading.Thread(target=self._do_analysis, daemon=True).start()
-            elif keycode == NEWROUND_CODE and self.running:
-                L.info(f"{NEWROUND_NAME} gedrückt — Neue Runde!")
-                self._new_round()
-            elif keycode == DETAIL_CODE and self.running and not self._detailing:
-                L.info(f"{DETAIL_NAME} gedrückt — Detail laden!")
-                threading.Thread(target=self._do_detail, daemon=True).start()
+            active = self.companion
+            if active and self.running:
+                if keycode == HOTKEY_CODE:
+                    L.info(f"{HOTKEY_NAME} gedrückt: Tisch neu lesen")
+                    active.force_read()
+                elif keycode == NEWROUND_CODE:
+                    L.info(f"{NEWROUND_NAME} gedrückt: neue Hand")
+                    active.new_hand()
+                elif keycode == MUTE_CODE:
+                    L.info(f"{MUTE_NAME} gedrückt: stumm = {active.toggle_mute()}")
             return event
 
         mask = CGEventMaskBit(kCGEventKeyDown)
@@ -364,115 +394,6 @@ class PokerTrainerApp(rumps.App):
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes)
         L.debug("Event Tap aktiv, warte auf Hotkey...")
         CFRunLoopRun()
-
-    def _new_round(self):
-        """Reset opponent history and overlay for a new round."""
-        if self.analyzer_inst:
-            count = len(self.analyzer_inst._opponent_history)
-            self.analyzer_inst._opponent_history.clear()
-            L.info(f"Opponent history geleert ({count} Einträge)")
-        if self.overlay_win:
-            self.overlay_win.update_status(f"Neue Runde — {HOTKEY_NAME} zum Analysieren")
-
-    def _do_analysis(self):
-        """Run quick analysis: ACTION, AMOUNT, HAND, POTODDS, EQUITY."""
-        if self._analyzing or not self.running:
-            return
-        self._analyzing = True
-
-        try:
-            region = self.cfg["crop_region"]
-
-            if self.overlay_win:
-                self.overlay_win.update_status("Analysiere...")
-
-            img = capture.capture_region_pil(region)
-            if img is None:
-                L.warning("Capture fehlgeschlagen")
-                if self.overlay_win:
-                    self.overlay_win.update_status("Capture fehlgeschlagen")
-                return
-
-            t0 = time.time()
-            L.info(f"Quick-Analyse ({self.analyzer_inst.model})...")
-
-            def on_action(action):
-                dt = time.time() - t0
-                L.info(f"ACTION nach {dt:.1f}s: {action}")
-                if self.overlay_win:
-                    color = "#00CC00"
-                    if action in ("FOLD",):
-                        color = "#FF4444"
-                    elif action in ("CALL", "CHECK"):
-                        color = "#FFAA00"
-                    elif action == "WAIT":
-                        color = "#666666"
-                    self.overlay_win.update_tip(action, "", "", color=color)
-
-            tip = self.analyzer_inst.analyze_quick(img, on_action=on_action)
-            dt = time.time() - t0
-
-            if tip and self.overlay_win:
-                if tip.is_actionable:
-                    self.overlay_win.update_tip(
-                        tip.action, tip.amount,
-                        f"F3 für Details",
-                        tip.hand, "", tip.color,
-                        tip.pot_odds, tip.equity,
-                    )
-                    L.info(f"Quick nach {dt:.1f}s: {tip.action} {tip.amount} Odds={tip.pot_odds} Eq={tip.equity}")
-                else:
-                    self.overlay_win.update_status(
-                        f"Warte... ({HOTKEY_NAME} zum Analysieren)"
-                    )
-                    L.info(f"WAIT nach {dt:.1f}s")
-
-                history.log_hand(tip, dt)
-
-            elif not tip:
-                L.warning(f"Quick-Analyse fehlgeschlagen nach {dt:.1f}s")
-                if self.overlay_win:
-                    self.overlay_win.update_status("Fehler — nochmal F1")
-
-        finally:
-            self._analyzing = False
-
-    def _do_detail(self):
-        """Load detailed analysis: REASON, BOARD, OPPONENTS."""
-        if self._detailing or not self.running:
-            return
-        if not self.analyzer_inst or not self.analyzer_inst._last_quick_tip:
-            L.warning("Kein Quick-Result vorhanden — erst F1 drücken")
-            return
-
-        self._detailing = True
-        try:
-            if self.overlay_win:
-                quick = self.analyzer_inst._last_quick_tip
-                self.overlay_win.update_tip(
-                    quick.action, quick.amount,
-                    "Lade Details...",
-                    quick.hand, "", quick.color,
-                    quick.pot_odds, quick.equity,
-                )
-
-            t0 = time.time()
-            tip = self.analyzer_inst.analyze_detail()
-            dt = time.time() - t0
-
-            if tip and self.overlay_win:
-                self.overlay_win.update_tip(
-                    tip.action, tip.amount, tip.reason,
-                    tip.hand, tip.board, tip.color,
-                    tip.pot_odds, tip.equity,
-                )
-                L.info(f"Detail nach {dt:.1f}s: {tip.reason[:60]}...")
-                if tip.reason:
-                    self._speak(tip.reason)
-            elif not tip:
-                L.warning(f"Detail fehlgeschlagen nach {dt:.1f}s")
-        finally:
-            self._detailing = False
 
     def terminate(self):
         L.info("Quit angefordert")
@@ -557,10 +478,10 @@ def _cleanup_pid():
 
 def main():
     cfg = config.load()
-    api_key = config.get_api_key(cfg) or _ask_api_key(cfg)
 
-    if not api_key:
-        L.error("ANTHROPIC_API_KEY nicht gesetzt!")
+    # A logged-in `claude` is enough, the API key is only the fallback.
+    if not brain.find_claude() and not (config.get_api_key(cfg) or _ask_api_key(cfg)):
+        L.error("Weder claude noch ANTHROPIC_API_KEY vorhanden!")
         sys.exit(1)
 
     _kill_existing()

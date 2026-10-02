@@ -27,7 +27,7 @@ CLAUDE_CANDIDATES = ("~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/lo
 EYES_SYSTEM = """Du liest einen Texas-Hold'em-Tisch aus einem Screenshot aus. Du gibst keine Empfehlung.
 Antworte NUR mit einem JSON-Objekt, ohne Markdown, ohne Erklärung:
 {"hero_cards": ["5c","6s"], "board": ["7s","Qh","7c"], "pot": 10, "to_call": 0, "hero_stack": 2762,
- "hero_to_act": true, "buttons": ["Fold","Check","Raise"], "hero_position": "BTN", "big_blind": 2,
+ "hero_to_act": true, "buttons": ["Fold","Check","Raise"], "hero_dealer": false, "big_blind": 2,
  "facing_raise": false,
  "players": [{"name": "Tilly", "stack": 554, "in_hand": true, "last_action": "check", "dealer": false}]}
 Regeln:
@@ -36,7 +36,7 @@ Regeln:
 - hero_to_act ist true genau dann, wenn Aktionsbuttons (Fold/Check/Call/Raise) sichtbar sind.
 - to_call ist der Betrag, den Hero zum Mitgehen zahlen muss (steht meist auf dem Call-Button), 0 wenn Check möglich ist.
 - pot ist der angezeigte Pot. big_blind nur, wenn die Blinds erkennbar sind.
-- hero_position: BTN, SB, BB, UTG, MP oder CO, abgeleitet vom Dealer-Button. Wenn unklar: null.
+- hero_dealer ist true, wenn der Dealer-Button (D) an Heros Platz liegt.
 - facing_raise: preflop true, wenn vor Hero jemand erhöht hat. Sonst false. Wenn unklar: null.
 - players: alle Gegner. in_hand ist false, wenn der Spieler gefoldet hat oder keine Karten hat.
   last_action: fold, check, call, bet, raise, allin oder null.

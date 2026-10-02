@@ -231,7 +231,7 @@ class Companion:
         if final.clamped:
             self._update(why=f"{final.note}. Der Coach wollte: {' '.join(coach)}")
         if coach:
-            self._add_line("coach", f"{final.action} {_amount(final)}".strip() + ": " + " ".join(coach))
+            self._add_line("coach", " ".join(coach))
         self._last_decision = history.log_decision({
             "hand_no": self.tracker.hand_no, "street": state.street,
             "hand": cards.pretty_list(state.hero_cards), "board": cards.pretty_list(state.board),

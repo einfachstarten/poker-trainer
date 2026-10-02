@@ -65,12 +65,15 @@
 
 <section id="strategy">
   <h2>Strategie <span id="strategy-name"></span></h2>
-  <label>Handauswahl <span class="ends">tight / loose</span>
-    <input id="tightness" type="range" min="1" max="5" step="1" value="2"></label>
-  <label>Aggression <span class="ends">passiv / aggressiv</span>
-    <input id="aggression" type="range" min="1" max="5" step="1" value="3"></label>
-  <label>Bluffs <span class="ends">nie / oft</span>
-    <input id="bluff" type="range" min="1" max="5" step="1" value="2"></label>
+  <label><span class="dial">Handauswahl <output id="tightness-value">2</output></span>
+    <input id="tightness" type="range" min="1" max="5" step="1" value="2">
+    <span class="ends"><span>tight</span><span>loose</span></span></label>
+  <label><span class="dial">Aggression <output id="aggression-value">3</output></span>
+    <input id="aggression" type="range" min="1" max="5" step="1" value="3">
+    <span class="ends"><span>passiv</span><span>aggressiv</span></span></label>
+  <label><span class="dial">Bluffs <output id="bluff-value">2</output></span>
+    <input id="bluff" type="range" min="1" max="5" step="1" value="2">
+    <span class="ends"><span>nie</span><span>oft</span></span></label>
 </section>
 
 <footer>

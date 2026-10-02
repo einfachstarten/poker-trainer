@@ -229,17 +229,28 @@ button:active { background: var(--line); }
 
 #strategy label {
   display: grid;
-  grid-template-columns: 96px 1fr;
+  grid-template-columns: 112px 1fr;
   grid-template-rows: auto auto;
   column-gap: 8px;
   align-items: center;
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 13px;
+}
+
+#strategy .dial { grid-column: 1; grid-row: 1; }
+
+#strategy output {
+  margin-left: 4px;
+  color: var(--muted);
+  font: 600 12px "SF Mono", Menlo, monospace;
 }
 
 #strategy .ends {
   grid-column: 2;
   grid-row: 2;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
   font-size: 11px;
   color: var(--muted);
 }
@@ -248,7 +259,20 @@ button:active { background: var(--line); }
   grid-column: 2;
   grid-row: 1;
   width: 100%;
-  accent-color: var(--passive);
+  height: 4px;
+  margin: 6px 0;
+  border-radius: 2px;
+  background: var(--line);
+  -webkit-appearance: none;
+  outline: none;
+}
+
+#strategy input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
 }
 
 footer {

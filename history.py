@@ -1,4 +1,4 @@
-"""Hand history logging."""
+"""Decision history: what was recommended, on which numbers, and what the player did."""
 
 from __future__ import annotations
 
@@ -11,26 +11,6 @@ L = log.get("history")
 
 HISTORY_DIR = os.path.expanduser("~/.poker-trainer")
 HISTORY_FILE = os.path.join(HISTORY_DIR, "history.jsonl")
-
-
-def log_hand(tip, duration: float):
-    """Append a hand analysis to the history file."""
-    os.makedirs(HISTORY_DIR, exist_ok=True)
-    entry = {
-        "timestamp": datetime.now().isoformat(),
-        "action": tip.action,
-        "amount": tip.amount,
-        "reason": tip.reason,
-        "hand": tip.hand,
-        "board": tip.board,
-        "pot_odds": tip.pot_odds,
-        "equity": tip.equity,
-        "opponents": tip.opponents,
-        "response_time": round(duration, 1),
-    }
-    with open(HISTORY_FILE, "a") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    L.debug(f"History: {tip.action} {tip.hand}")
 
 
 def log_decision(entry: dict) -> dict:

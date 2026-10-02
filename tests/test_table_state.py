@@ -5,7 +5,7 @@ from table_state import HandTracker, TableState
 READING = {
     "hero_cards": ["5♣", "6s"], "board": ["7s", "Qh", "7c"], "street": "preflop",
     "pot": "$10", "to_call": 0, "hero_stack": "$2,762", "hero_to_act": True,
-    "buttons": ["Fold", "Check", "Raise"], "hero_position": "SB",
+    "buttons": ["Fold", "Check", "Raise"], "hero_dealer": False,
     "players": [
         {"name": "Tilly", "stack": 554, "in_hand": True, "last_action": None, "dealer": False},
         {"name": "Tyler", "stack": "$30", "in_hand": True, "last_action": None, "dealer": True},
@@ -39,6 +39,10 @@ class TableStateTest(unittest.TestCase):
         s = TableState.from_reading(reading(hero_cards=None, hero_to_act=False))
         self.assertTrue(s.valid)
         self.assertFalse(s.actionable)
+
+    def test_position_only_from_dealer_button(self):
+        self.assertIsNone(TableState.from_reading(READING).hero_position)
+        self.assertEqual(TableState.from_reading(reading(hero_dealer=True)).hero_position, "BTN")
 
     def test_garbage_reading(self):
         self.assertIsNone(TableState.from_reading("kein json"))

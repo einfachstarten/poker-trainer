@@ -9,7 +9,6 @@ import cards
 
 STREETS = {0: "preflop", 3: "flop", 4: "turn", 5: "river"}
 STREET_NAMES = {"preflop": "Preflop", "flop": "Flop", "turn": "Turn", "river": "River"}
-POSITIONS = ("UTG", "EP", "MP", "CO", "BTN", "SB", "BB")
 ACTION_KINDS = ("fold", "check", "call", "bet", "raise", "allin")
 MIN_ACTIONS_FOR_LABEL = 8
 
@@ -84,14 +83,16 @@ class TableState:
                 dealer=bool(p.get("dealer", False)),
             ))
 
-        position = str(data.get("hero_position") or "").upper()
+        # Only the button is read off the table. Other positions need the seat order,
+        # which a single screenshot reading does not give reliably.
+        position = "BTN" if data.get("hero_dealer") is True else None
         facing = data.get("facing_raise")
         return cls(
             hero_cards=hero, board=board, street=STREETS.get(len(board), "preflop"),
             pot=_num(data.get("pot")), to_call=_num(data.get("to_call")) or 0.0,
             hero_stack=_num(data.get("hero_stack")), hero_to_act=bool(data.get("hero_to_act")),
             buttons=[str(b) for b in data.get("buttons") or []], players=players,
-            hero_position=position if position in POSITIONS else None,
+            hero_position=position,
             big_blind=_num(data.get("big_blind")),
             facing_raise=facing if isinstance(facing, bool) else None, valid=valid,
         )

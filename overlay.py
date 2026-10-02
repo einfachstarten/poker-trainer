@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import cards
 import log
 from AppKit import (
     NSWindow, NSView, NSTextField, NSFont, NSColor, NSScreen,
@@ -152,7 +153,7 @@ class Overlay:
         # Action label (top, stretches with width)
         self._action_label = NSTextField.alloc().initWithFrame_(
             NSMakeRect(12, h - 45, w - 24, 38))
-        self._action_label.setStringValue_("Drücke F1 zum Analysieren")
+        self._action_label.setStringValue_("Warte auf den Tisch")
         self._action_label.setFont_(NSFont.fontWithName_size_("Menlo-Bold", 24))
         self._action_label.setTextColor_(NSColor.grayColor())
         self._action_label.setBezeled_(False)
@@ -200,9 +201,9 @@ class Overlay:
         self._btn_target._callback = self._on_button
         btn_w = (w - 24 - 8) // 3  # 3 buttons with 4px gaps
         btn_defs = [
-            (1, "⚡ Analyse"),
-            (2, "🔄 Neue Runde"),
-            (3, "📋 Detail"),
+            (1, "Neu lesen"),
+            (2, "Neue Hand"),
+            (3, "Stumm"),
         ]
         for i, (tag, label) in enumerate(btn_defs):
             x_btn = 12 + i * (btn_w + 4)
@@ -259,6 +260,25 @@ class Overlay:
 
         from PyObjCTools import AppHelper
         AppHelper.callAfter(_do_update)
+
+    def render(self, model: dict):
+        """Compact layout: show the companion's view model with the three labels."""
+        action = model.get("action")
+        if not action:
+            self.update_status(model.get("headline") or model.get("status") or "")
+            return
+        color = {"FOLD": "#FF4444", "CHECK": "#FFAA00", "CALL": "#FFAA00"}.get(action, "#00CC00")
+
+        def percent(value):
+            return f"{round(value * 100)}%" if value is not None else "-"
+
+        self.update_tip(
+            action, model.get("amount") or "-", model.get("why") or "",
+            hand=cards.pretty_list(model.get("hand") or []),
+            board=cards.pretty_list(model.get("board") or []) or "-", color=color,
+            pot_odds=percent(model.get("required")) if model.get("to_call") else "-",
+            equity=percent(model.get("equity")),
+        )
 
     def update_status(self, text: str):
         if self._action_label is None:
